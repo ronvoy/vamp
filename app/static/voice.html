@@ -8,7 +8,6 @@
     :root {
       --bg: #fff;
       --bg-secondary: #f8f9fa;
-      --bg-sidebar-rail: #e9ecef;
       --text: #333;
       --text-muted: #666;
       --border: #dee2e6;
@@ -20,7 +19,6 @@
     body.dark {
       --bg: #1a1a1a;
       --bg-secondary: #2d2d2d;
-      --bg-sidebar-rail: #252525;
       --text: #e8e8e8;
       --text-muted: #a0a0a0;
       --border: #404040;
@@ -35,16 +33,16 @@
 
     #sidebar-rail {
       position: fixed; top: 0; left: 0; bottom: 0; width: 5rem;
-      background: var(--bg-sidebar-rail); z-index: 9;
+      background: var(--bg); z-index: 9;
       display: flex; align-items: flex-start; padding-top: 1rem; padding-left: 0.5rem;
     }
     body.sidebar-open #sidebar-rail { width: 0; overflow: hidden; padding: 0; }
 
-    .main { flex: 1; padding: 2rem; max-width: 600px; min-width: 0; margin-left: 5rem; transition: margin-left 0.2s ease; }
+    .main { flex: 1; padding: 2rem; padding-top: 3.5rem; max-width: 600px; min-width: 0; margin-left: 5rem; transition: margin-left 0.2s ease; }
     body.sidebar-open .main { margin-left: min(300px, 85vw); }
     @media (max-width: 768px) {
       #sidebar-rail { width: 3.5rem; padding-left: 0.35rem; }
-      .main { margin-left: 3.5rem; padding: 1rem; padding-top: 2.5rem; }
+      .main { margin-left: 3.5rem; padding: 1rem; padding-top: 3rem; }
       body.sidebar-open .main { margin-left: 0; }
       h1 { font-size: 1.5rem; }
     }
@@ -65,7 +63,7 @@
       border-radius: 8px; border: 1px solid var(--border);
     }
     #preview-box.visible { display: block; }
-    #preview-text { font-size: 0.95rem; white-space: pre-wrap; margin-bottom: 1rem; }
+    #preview-text { font-size: 0.95rem; width: 100%; min-height: 80px; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; font-family: inherit; }
     #preview-actions { display: flex; gap: 0.5rem; }
     #btn-send { background: var(--path-color); color: white; }
     #btn-cancel { background: var(--border); color: var(--text); }
@@ -116,12 +114,13 @@
     }
 
     #sidebar {
-      width: min(300px, 85vw); min-height: 100vh; background: var(--bg-secondary);
+      width: min(300px, 85vw); height: 100vh; background: var(--bg-secondary);
       border-right: 1px solid var(--border); padding: 1rem;
       position: fixed; top: 0; left: 0; z-index: 10;
       transform: translateX(-100%); transition: transform 0.2s ease;
       display: flex; flex-direction: column; overflow: hidden;
     }
+    #sidebar-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     body.sidebar-open #sidebar { transform: translateX(0); }
     @media (max-width: 768px) {
       #sidebar { width: 85vw; }
@@ -146,7 +145,7 @@
       background: var(--bg); color: var(--text);
     }
     #history-search::placeholder { color: var(--text-muted); }
-    #history-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+    #history-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; min-height: 0; }
     #history-list li {
       padding: 0.6rem 0; border-bottom: 1px solid var(--border);
       display: flex; flex-direction: column; gap: 0.2rem; cursor: pointer;
@@ -170,19 +169,22 @@
       <h3>Chat history</h3>
       <button id="sidebar-close" title="Close"><span class="icon">✕</span><span class="label">Close</span></button>
     </div>
-    <input type="text" id="history-search" placeholder="Search chats..." autocomplete="off" />
-    <ul id="history-list"></ul>
+    <div id="sidebar-inner">
+      <input type="text" id="history-search" placeholder="Search chats..." autocomplete="off" />
+      <ul id="history-list"></ul>
+    </div>
   </aside>
 
   <div class="main">
     <h1>Vamp — Voice App Maker Pro</h1>
-    <p>Say your task. Include agent: &quot;use GPT&quot;, &quot;Claude build&quot;, etc.</p>
+    
     <div id="record-wrap">
       <button id="record">Hold to record</button>
     </div>
     <div id="live-transcript"></div>
     <div id="preview-box">
-      <div id="preview-text"></div>
+      <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Edit your prompt if needed:</label>
+      <textarea id="preview-text" placeholder="Transcribed text..."></textarea>
       <div id="preview-actions">
         <button id="btn-send">Send</button>
         <button id="btn-cancel">Cancel</button>
@@ -287,7 +289,7 @@
         const data = await r.json();
         if (data.error) { if (out) out.textContent = 'Error: ' + data.error; return; }
         pendingTranscript = data;
-        if (previewText) previewText.textContent = data.text || '(no speech detected)';
+        if (previewText) previewText.value = data.text || '(no speech detected)';
         if (previewBox) previewBox.classList.add('visible');
         if (out) out.textContent = '';
       } catch (e) {
@@ -296,18 +298,17 @@
     }
 
     btnSend.addEventListener('click', async () => {
-      if (!pendingTranscript) return;
-      const { text, task, agent } = pendingTranscript;
-      if (!task && !text) { if (out) out.textContent = 'No task to send.'; return; }
+      const editedTask = previewText?.value?.trim() || '';
+      if (!editedTask) { if (out) out.textContent = 'No task to send.'; return; }
       if (previewBox) previewBox.classList.remove('visible');
       pendingTranscript = null;
       if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; }
       if (out) out.innerHTML = '<span class="path">Generating...</span>';
       try {
-        const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: task || text, agent }) });
+        const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: editedTask }) });
         const data = await r.json();
         if (data.error) { if (out) out.textContent = 'Error: ' + data.error; return; }
-        renderResponse(data, task || text, agent);
+        renderResponse(data, editedTask, data.agent || pendingTranscript?.agent || '');
       } catch (e) { if (out) out.textContent = 'Error: ' + (e?.message || e); }
       loadHistory();
     });

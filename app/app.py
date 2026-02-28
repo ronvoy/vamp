@@ -133,6 +133,7 @@ def api_generate():
         "reasoning": result.get("reasoning", ""),
         "raw_response": result.get("raw_response", ""),
         "usage": result.get("usage", {}),
+        "task": task, "agent": agent,
     })
 
 if __name__ == "__main__":
