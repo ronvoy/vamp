@@ -36,22 +36,25 @@ def _client():
         api_key=os.environ.get("OPENROUTER_API_KEY"),
     )
 
-def generate_openai(task: str) -> dict:
+def generate_openai(task: str, context: str | None = None) -> dict:
     """Generate code via OpenRouter -> GPT."""
-    return _generate(task, "openai")
+    return _generate(task, "openai", context)
 
-def generate_anthropic(task: str) -> dict:
+def generate_anthropic(task: str, context: str | None = None) -> dict:
     """Generate code via OpenRouter -> Claude."""
-    return _generate(task, "anthropic")
+    return _generate(task, "anthropic", context)
 
-def _generate(task: str, agent: str) -> dict:
+def _generate(task: str, agent: str, context: str | None = None) -> dict:
     model = MODELS.get(agent, MODELS["openai"])
     client = _client()
+    user_content = f"Task: {task}"
+    if context:
+        user_content = f"Continue from previous work. Context:\n{context}\n\nNew request: {task}"
     r = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Task: {task}"},
+            {"role": "user", "content": user_content},
         ],
         max_tokens=4096,
     )

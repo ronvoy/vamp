@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vamp — Voice App Maker Pro</title>
+  <title>VAMP — Voice App Maker Pro</title>
   <style>
     :root {
       --bg: #fff;
@@ -66,6 +66,9 @@
     #btn-cancel { background: var(--border); color: var(--text); }
     #btn-clear { padding: 0.6rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); }
     #btn-clear:hover { background: var(--output-bg); color: var(--text); }
+    #btn-continue { padding: 0.6rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); display: none; }
+    #btn-continue.visible { display: inline-flex; }
+    #btn-continue:hover { background: var(--output-bg); color: var(--text); }
     #output { margin-top: 1rem; }
     .path { color: var(--path-color); font-weight: bold; }
     .response-card {
@@ -175,7 +178,7 @@
   </aside>
 
   <div class="main">
-    <h1>Vamp — Voice App Maker Pro</h1>
+    <h1>VAMP — Voice App Maker Pro</h1>
     
     <div id="record-wrap">
       <button id="btn-clear" title="Clear chat & start new">+</button>
@@ -198,6 +201,7 @@
     const rec = document.getElementById('record');
     const recordWrap = document.getElementById('record-wrap');
     const btnClear = document.getElementById('btn-clear');
+    const btnContinue = document.getElementById('btn-continue');
     const previewBox = document.getElementById('preview-box');
     const previewText = document.getElementById('preview-text');
     const btnSend = document.getElementById('btn-send');
@@ -212,6 +216,7 @@
 
     let allItems = [], searchTimeout;
     let pendingTranscript = null;
+    let continueContext = null;
 
     if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
     themeBtn.addEventListener('click', () => {
@@ -228,6 +233,8 @@
     closeBtn.addEventListener('click', () => document.body.classList.remove('sidebar-open'));
 
     btnClear.addEventListener('click', () => {
+      continueContext = null;
+      if (btnContinue) btnContinue.classList.remove('visible');
       if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; }
       if (out) out.innerHTML = '';
       if (previewText) previewText.value = '';
@@ -303,10 +310,12 @@
       if (!editedTask) { if (out) out.textContent = 'No task to send.'; return; }
       if (previewBox) previewBox.classList.remove('visible');
       pendingTranscript = null;
-      if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; }
+      if (!continueContext) { if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; } }
       if (out) out.innerHTML = '<span class="path">Generating...</span>';
+      const body = { task: editedTask };
+      if (continueContext) body.continue_from = continueContext;
       try {
-        const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: editedTask }) });
+        const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await r.json();
         if (data.error) { if (out) out.textContent = 'Error: ' + data.error; return; }
         renderResponse(data, editedTask, data.agent || pendingTranscript?.agent || '');
@@ -395,6 +404,8 @@
 
     function renderDetailPanel(conv) {
       if (!detailPanel) return;
+      continueContext = conv.folder;
+      if (btnContinue) btnContinue.classList.add('visible');
       const meta = conv.metadata || {};
       const files = conv.files || {};
       const fileNames = Object.keys(files);
@@ -440,7 +451,7 @@
         try {
           const r = await fetch(API + '/api/conversation/' + encodeURIComponent(conv.folder), { method: 'DELETE' });
           const d = await r.json();
-          if (d.ok) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; out.innerHTML = ''; loadHistory(); }
+          if (d.ok) { continueContext = null; if (btnContinue) btnContinue.classList.remove('visible'); detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; out.innerHTML = ''; loadHistory(); }
           else alert(d.error || 'Delete failed');
         } catch (e) { alert(e.message); }
       });

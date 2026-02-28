@@ -108,15 +108,27 @@ def api_delete_conversation(folder):
 
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
-    """Generate from text (no audio)."""
+    """Generate from text (no audio). Optional continue_from=folder for context."""
     data = request.get_json() or {}
     task = data.get("task") or data.get("text", "")
     agent = data.get("agent") or select_agent(task)
+    continue_from = data.get("continue_from")
     if not task:
         return jsonify({"error": "No task"}), 400
+    context = None
+    if continue_from:
+        conv = get_conversation(continue_from)
+        if conv:
+            meta = conv.get("metadata", {})
+            files = conv.get("files", {})
+            parts = [f"Previous task: {meta.get('task', '')}"]
+            for name, content in files.items():
+                if content and "(binary" not in str(content):
+                    parts.append(f"\n{name}:\n```\n{content}\n```")
+            context = "\n".join(parts)
     gen = GENERATORS.get(agent, generate_openai)
     try:
-        result = gen(task)
+        result = gen(task, context=context)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     path = save_conversation(
