@@ -61,25 +61,38 @@ def sanitize_folder_name(name: str) -> str:
     return re.sub(r"[^a-z0-9\-]", "", name.lower())[:50] or "generated-app"
 
 
-def save_conversation(main_py: str, requirements: str, folder_name: str, task: str, agent: str, reasoning: str = "", raw_response: str = "", usage: dict = None) -> str:
-    """Create conversation subfolder, write files, return path."""
+def save_conversation(files: dict[str, str], folder_name: str, task: str, agent: str, reasoning: str = "", raw_response: str = "", usage: dict = None) -> str:
+    """Create conversation subfolder, write files from dict, return path."""
     name = sanitize_folder_name(folder_name)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     dir_name = f"{timestamp}_{name}"
     path = os.path.join(CONV_DIR, dir_name)
     os.makedirs(path, exist_ok=True)
-    reqs = requirements.strip() or "flask>=3.0.0\nrequests>=2.31.0\n"
-    with open(os.path.join(path, "main.py"), "w", encoding="utf-8") as f:
-        f.write(main_py)
-    with open(os.path.join(path, "requirements.txt"), "w", encoding="utf-8") as f:
-        f.write(reqs)
-    with open(os.path.join(path, "README.md"), "w", encoding="utf-8") as f:
-        f.write(f"# {name}\n\n{task}\n\n## Run\n\n```bash\npip install -r requirements.txt\npython main.py\n```\n")
+    file_names = []
+    for fname, content in files.items():
+        if not fname or ".." in fname or "/" in fname or "\\" in fname:
+            continue
+        safe_name = os.path.basename(fname) or "output.txt"
+        fpath = os.path.join(path, safe_name)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(content or "")
+        file_names.append(safe_name)
+    is_python = "main.py" in files
+    if "README.md" not in files:
+        if is_python:
+            readme = f"# {name}\n\n{task}\n\n## Run\n\n```bash\npip install -r requirements.txt\npython main.py\n```\n"
+        elif "index.html" in files:
+            readme = f"# {name}\n\n{task}\n\n## Run\n\nOpen `index.html` in a browser.\n"
+        else:
+            readme = f"# {name}\n\n{task}\n"
+        with open(os.path.join(path, "README.md"), "w", encoding="utf-8") as f:
+            f.write(readme)
+        file_names.append("README.md")
     meta = {
         "task": task,
         "agent": agent,
         "created": datetime.now().isoformat(),
-        "files": ["main.py", "requirements.txt", "README.md"],
+        "files": file_names,
         "reasoning": reasoning or "",
         "raw_response": raw_response or "",
         "usage": usage or {},

@@ -48,17 +48,18 @@ def handle_voice():
         return jsonify({"error": str(e), "text": text}), 500
 
     path = save_conversation(
-        result["main_py"], result["requirements"], result["folder_name"],
+        result["files"], result["folder_name"],
         task, agent,
         reasoning=result.get("reasoning", ""),
         raw_response=result.get("raw_response", ""),
         usage=result.get("usage", {}),
     )
     folder = os.path.basename(path)
+    file_list = list(result.get("files", {}).keys()) or ["main.py", "requirements.txt", "README.md"]
     return jsonify({
         "text": text, "task": task, "agent": agent,
         "path": path, "folder": folder,
-        "files": result.get("files", ["main.py", "requirements.txt", "README.md"]),
+        "files": file_list,
         "reasoning": result.get("reasoning", ""),
         "usage": result.get("usage", {}),
     })
@@ -132,16 +133,17 @@ def api_generate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     path = save_conversation(
-        result["main_py"], result["requirements"], result["folder_name"],
+        result["files"], result["folder_name"],
         task, agent,
         reasoning=result.get("reasoning", ""),
         raw_response=result.get("raw_response", ""),
         usage=result.get("usage", {}),
     )
     folder = os.path.basename(path)
+    file_list = list(result.get("files", {}).keys()) or ["main.py", "requirements.txt", "README.md"]
     return jsonify({
         "path": path, "folder": folder,
-        "files": ["main.py", "requirements.txt", "README.md"],
+        "files": file_list,
         "reasoning": result.get("reasoning", ""),
         "raw_response": result.get("raw_response", ""),
         "usage": result.get("usage", {}),
