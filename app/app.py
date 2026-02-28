@@ -9,7 +9,7 @@ from flask_cors import CORS
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
 from code_generator import generate_openai, generate_anthropic
-from conversation_store import save_conversation
+from conversation_store import save_conversation, list_conversations
 
 app = Flask(__name__)
 CORS(app)
@@ -66,6 +66,11 @@ def api_transcribe():
     agent = select_agent(text)
     task = extract_task(text) or text
     return jsonify({"text": text, "agent": agent, "task": task})
+
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    """List all past conversation sessions."""
+    return jsonify(list_conversations())
 
 @app.route("/api/generate", methods=["POST"])
 def api_generate():

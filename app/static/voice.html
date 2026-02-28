@@ -2,53 +2,206 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vamp — Voice to App</title>
   <style>
+    :root {
+      --bg: #fff;
+      --bg-secondary: #f8f9fa;
+      --bg-sidebar-rail: #e9ecef;
+      --text: #333;
+      --text-muted: #666;
+      --border: #dee2e6;
+      --output-bg: #f5f5f5;
+      --path-color: #27ae60;
+      --record-bg: #e74c3c;
+      --record-bg-hover: #c0392b;
+    }
+    body.dark {
+      --bg: #1a1a1a;
+      --bg-secondary: #2d2d2d;
+      --bg-sidebar-rail: #252525;
+      --text: #e8e8e8;
+      --text-muted: #a0a0a0;
+      --border: #404040;
+      --output-bg: #2a2a2a;
+      --path-color: #34d399;
+      --record-bg: #dc2626;
+      --record-bg-hover: #b91c1c;
+    }
+
     * { box-sizing: border-box; }
-    body { font-family: system-ui; max-width: 600px; margin: 2rem auto; padding: 1rem; }
-    h1 { color: #333; }
+    body { font-family: system-ui; margin: 0; min-height: 100vh; display: flex; background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }
+
+    #sidebar-rail {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 5rem;
+      background: var(--bg-sidebar-rail); z-index: 9;
+      display: flex; align-items: flex-start; padding-top: 1rem; padding-left: 0.5rem;
+    }
+    body.sidebar-open #sidebar-rail { width: 0; overflow: hidden; padding: 0; }
+
+    .main { flex: 1; padding: 2rem; max-width: 600px; min-width: 0; margin-left: 5rem; transition: margin-left 0.2s ease; }
+    body.sidebar-open .main { margin-left: min(300px, 85vw); }
+    @media (max-width: 768px) {
+      #sidebar-rail { width: 3.5rem; padding-left: 0.35rem; }
+      .main { margin-left: 3.5rem; padding: 1rem; padding-top: 2.5rem; }
+      body.sidebar-open .main { margin-left: 0; }
+      h1 { font-size: 1.5rem; }
+    }
+
+    h1 { color: var(--text); margin-top: 0; }
     button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: none; }
-    #record { background: #e74c3c; color: white; }
-    #record.recording { background: #c0392b; animation: pulse 1s infinite; }
+    #record { background: var(--record-bg); color: white; }
+    #record.recording { background: var(--record-bg-hover); animation: pulse 1s infinite; }
     @keyframes pulse { 50% { opacity: 0.8; } }
-    #output { margin-top: 1rem; padding: 1rem; background: #f5f5f5; border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; }
-    .path { color: #27ae60; font-weight: bold; }
+    #output { margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; }
+    .path { color: var(--path-color); font-weight: bold; }
+
+    #open-history {
+      position: relative; left: 0;
+      padding: 0.5rem 0.75rem; font-size: 0.9rem; background: var(--bg-secondary);
+      color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+      cursor: pointer; display: flex; align-items: center; gap: 0.25rem;
+    }
+    #open-history:hover { filter: brightness(0.95); }
+    body.sidebar-open #open-history { display: none; }
+    #open-history .label { }
+    @media (max-width: 768px) {
+      #open-history .label { display: none; }
+    }
+
+    #theme-toggle {
+      position: fixed; top: 1rem; right: 1rem; z-index: 11;
+      padding: 0.5rem 0.75rem; font-size: 1rem; background: var(--bg-secondary);
+      color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; cursor: pointer;
+    }
+    #theme-toggle:hover { filter: brightness(0.95); }
+    @media (max-width: 768px) {
+      #theme-toggle { top: 0.5rem; right: 0.5rem; padding: 0.4rem 0.6rem; font-size: 1.1rem; }
+    }
+
+    #sidebar {
+      width: min(300px, 85vw); min-height: 100vh; background: var(--bg-secondary);
+      border-right: 1px solid var(--border); padding: 1rem;
+      position: fixed; top: 0; left: 0; z-index: 10;
+      transform: translateX(-100%); transition: transform 0.2s ease;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    body.sidebar-open #sidebar { transform: translateX(0); }
+    @media (max-width: 768px) {
+      #sidebar { width: 85vw; }
+      body.sidebar-open .main { padding-left: 1rem; }
+    }
+
+    #sidebar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    #sidebar-header h3 { margin: 0; font-size: 1rem; color: var(--text); }
+    #sidebar-close {
+      padding: 0.35rem 0.6rem; font-size: 0.85rem; background: var(--border);
+      color: var(--text); border-radius: 6px; cursor: pointer; border: none;
+      display: flex; align-items: center; gap: 0.25rem;
+    }
+    #sidebar-close:hover { filter: brightness(0.9); }
+    @media (max-width: 768px) {
+      #sidebar-close .label { display: none; }
+    }
+
+    #history-search {
+      width: 100%; padding: 0.5rem 0.75rem; font-size: 0.9rem;
+      border: 1px solid var(--border); border-radius: 6px; margin-bottom: 1rem;
+      background: var(--bg); color: var(--text);
+    }
+    #history-search::placeholder { color: var(--text-muted); }
+    #history-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+    #history-list li {
+      padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 0.2rem; cursor: default;
+    }
+    #history-list li:last-child { border-bottom: none; }
+    .history-task { font-weight: 500; font-size: 0.9rem; color: var(--text); }
+    .history-meta { font-size: 0.75rem; color: var(--text-muted); }
+    .history-folder { font-family: monospace; font-size: 0.8rem; color: var(--path-color); }
+    .history-empty { color: var(--text-muted); font-style: italic; padding: 1rem 0; }
   </style>
 </head>
 <body>
-  <h1>Vamp — Voice to App</h1>
-  <p>Say your task. Include agent: &quot;use GPT&quot;, &quot;Claude build&quot;, etc.</p>
-  <button id="record">Hold to record</button>
-  <div id="output"></div>
+  <div id="sidebar-rail">
+    <button id="open-history" title="Open chat history"><span class="icon">☰</span><span class="label">History</span></button>
+  </div>
+
+  <button id="theme-toggle" title="Toggle theme">🌓</button>
+
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <h3>Chat history</h3>
+      <button id="sidebar-close" title="Close"><span class="icon">✕</span><span class="label">Close</span></button>
+    </div>
+    <input type="text" id="history-search" placeholder="Search chats..." autocomplete="off" />
+    <ul id="history-list"></ul>
+  </aside>
+
+  <div class="main">
+    <h1>Vamp — Voice to App</h1>
+    <p>Say your task. Include agent: &quot;use GPT&quot;, &quot;Claude build&quot;, etc.</p>
+    <button id="record">Hold to record</button>
+    <div id="output"></div>
+  </div>
+
   <script>
     const API = window.location.origin;
     const rec = document.getElementById('record');
     const out = document.getElementById('output');
-    let mediaRecorder, chunks;
+    const searchInput = document.getElementById('history-search');
+    const historyList = document.getElementById('history-list');
+    const openBtn = document.getElementById('open-history');
+    const closeBtn = document.getElementById('sidebar-close');
+    const themeBtn = document.getElementById('theme-toggle');
+
+    let allItems = [];
+    let searchTimeout;
+
+    if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
+    themeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('dark');
+      localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+      themeBtn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌓';
+    });
+    themeBtn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌓';
+
     rec.addEventListener('mousedown', start);
     rec.addEventListener('mouseup', stop);
     rec.addEventListener('mouseleave', stop);
+
+    openBtn.addEventListener('click', () => document.body.classList.add('sidebar-open'));
+    closeBtn.addEventListener('click', () => document.body.classList.remove('sidebar-open'));
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(renderFilteredList, 150);
+    });
+
     function start() {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        mediaRecorder = new MediaRecorder(stream);
-        chunks = [];
+        const mediaRecorder = new MediaRecorder(stream);
+        let chunks = [];
         mediaRecorder.ondataavailable = e => e.data.size && chunks.push(e.data);
-        mediaRecorder.onstop = send;
+        mediaRecorder.onstop = () => send(chunks);
         mediaRecorder.start();
         rec.classList.add('recording');
         rec.textContent = 'Recording... release to send';
+        rec._recorder = mediaRecorder;
       }).catch(e => { out.textContent = 'Mic error: ' + e.message; });
     }
     function stop() {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      if (rec._recorder && rec._recorder.state !== 'inactive') {
+        rec._recorder.stop();
+        rec._recorder.stream.getTracks().forEach(t => t.stop());
       }
       rec.classList.remove('recording');
       rec.textContent = 'Hold to record';
     }
-    async function send() {
-      if (!chunks.length) return;
+    async function send(chunks) {
+      if (!chunks || !chunks.length) return;
       const blob = new Blob(chunks, { type: 'audio/webm' });
       const fd = new FormData();
       fd.append('audio', blob, 'recording.webm');
@@ -59,7 +212,48 @@
         if (data.error) out.textContent = 'Error: ' + data.error;
         else out.innerHTML = 'Task: ' + data.task + '\nAgent: ' + data.agent + '\n<span class="path">Saved: ' + data.path + '</span>';
       } catch (e) { out.textContent = 'Error: ' + e.message; }
+      loadHistory();
     }
+
+    async function loadHistory() {
+      try {
+        const r = await fetch(API + '/api/history');
+        allItems = await r.json();
+        renderFilteredList();
+      } catch (e) {
+        historyList.innerHTML = '<li class="history-empty">Could not load history.</li>';
+      }
+    }
+
+    function renderFilteredList() {
+      const q = searchInput.value.trim().toLowerCase();
+      const filtered = q
+        ? allItems.filter(({ task, agent, folder }) =>
+            (task || '').toLowerCase().includes(q) ||
+            (agent || '').toLowerCase().includes(q) ||
+            (folder || '').toLowerCase().includes(q)
+          )
+        : allItems;
+
+      historyList.innerHTML = filtered.length
+        ? filtered.map(({ folder, task, agent, created }) => {
+            const date = created ? new Date(created).toLocaleString() : folder.slice(0, 16);
+            return `<li>
+              <span class="history-task">${escapeHtml(task || '(no task)')}</span>
+              <span class="history-meta">${escapeHtml(agent)} · ${date}</span>
+              <span class="history-folder">${escapeHtml(folder)}</span>
+            </li>`;
+          }).join('')
+        : '<li class="history-empty">' + (q ? 'No matches for "' + escapeHtml(q) + '".' : 'No past sessions yet. Record your first task.') + '</li>';
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    loadHistory();
   </script>
 </body>
 </html>
