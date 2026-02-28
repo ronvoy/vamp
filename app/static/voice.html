@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Vamp — Voice to App</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+    h1 { color: #333; }
+    button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: none; }
+    #record { background: #e74c3c; color: white; }
+    #record.recording { background: #c0392b; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.8; } }
+    #output { margin-top: 1rem; padding: 1rem; background: #f5f5f5; border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; }
+    .path { color: #27ae60; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Vamp — Voice to App</h1>
+  <p>Say your task. Include agent: &quot;use GPT&quot;, &quot;Claude build&quot;, etc.</p>
+  <button id="record">Hold to record</button>
+  <div id="output"></div>
+  <script>
+    const API = window.location.origin;
+    const rec = document.getElementById('record');
+    const out = document.getElementById('output');
+    let mediaRecorder, chunks;
+    rec.addEventListener('mousedown', start);
+    rec.addEventListener('mouseup', stop);
+    rec.addEventListener('mouseleave', stop);
+    function start() {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        mediaRecorder = new MediaRecorder(stream);
+        chunks = [];
+        mediaRecorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+        mediaRecorder.onstop = send;
+        mediaRecorder.start();
+        rec.classList.add('recording');
+        rec.textContent = 'Recording... release to send';
+      }).catch(e => { out.textContent = 'Mic error: ' + e.message; });
+    }
+    function stop() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      }
+      rec.classList.remove('recording');
+      rec.textContent = 'Hold to record';
+    }
+    async function send() {
+      if (!chunks.length) return;
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const fd = new FormData();
+      fd.append('audio', blob, 'recording.webm');
+      out.textContent = 'Sending...';
+      try {
+        const r = await fetch(API + '/api/voice', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (data.error) out.textContent = 'Error: ' + data.error;
+        else out.innerHTML = 'Task: ' + data.task + '\nAgent: ' + data.agent + '\n<span class="path">Saved: ' + data.path + '</span>';
+      } catch (e) { out.textContent = 'Error: ' + e.message; }
+    }
+  </script>
+</body>
+</html>
