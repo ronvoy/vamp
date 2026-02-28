@@ -69,8 +69,27 @@
     #preview-actions { display: flex; gap: 0.5rem; }
     #btn-send { background: var(--path-color); color: white; }
     #btn-cancel { background: var(--border); color: var(--text); }
-    #output { margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; }
+    #output { margin-top: 1rem; }
     .path { color: var(--path-color); font-weight: bold; }
+    .response-card {
+      background: var(--output-bg); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
+      border: 1px solid var(--border);
+    }
+    .response-card h4 { margin: 0 0 0.5rem 0; font-size: 0.95rem; }
+    .response-condensed { font-size: 0.85rem; color: var(--text-muted); max-height: 4em; overflow: hidden; text-overflow: ellipsis; }
+    .response-toggle { font-size: 0.8rem; cursor: pointer; color: var(--path-color); margin-top: 0.3rem; }
+    .response-toggle:hover { text-decoration: underline; }
+    .response-expanded { display: none; margin-top: 1rem; }
+    .response-expanded.visible { display: block; }
+    .code-block { background: #1e1e1e; color: #d4d4d4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-family: 'Consolas','Monaco',monospace; font-size: 0.8rem; white-space: pre; }
+    body.dark .code-block { background: #0d0d0d; color: #e0e0e0; }
+    .detail-panel { display: none; }
+    .detail-panel.visible { display: block; margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; border: 1px solid var(--border); }
+    .detail-panel h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
+    .detail-actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .detail-actions input { padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; flex: 1; min-width: 120px; }
+    .history-item { cursor: pointer; }
+    .history-item:hover { background: var(--output-bg); }
 
     #open-history {
       position: relative; left: 0;
@@ -130,7 +149,7 @@
     #history-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
     #history-list li {
       padding: 0.6rem 0; border-bottom: 1px solid var(--border);
-      display: flex; flex-direction: column; gap: 0.2rem; cursor: default;
+      display: flex; flex-direction: column; gap: 0.2rem; cursor: pointer;
     }
     #history-list li:last-child { border-bottom: none; }
     .history-task { font-weight: 500; font-size: 0.9rem; color: var(--text); }
@@ -170,6 +189,7 @@
       </div>
     </div>
     <div id="output"></div>
+    <div id="detail-panel" class="detail-panel"></div>
   </div>
 
   <script>
@@ -182,6 +202,7 @@
     const btnSend = document.getElementById('btn-send');
     const btnCancel = document.getElementById('btn-cancel');
     const out = document.getElementById('output');
+    const detailPanel = document.getElementById('detail-panel');
     const searchInput = document.getElementById('history-search');
     const historyList = document.getElementById('history-list');
     const openBtn = document.getElementById('open-history');
@@ -280,12 +301,13 @@
       if (!task && !text) { if (out) out.textContent = 'No task to send.'; return; }
       if (previewBox) previewBox.classList.remove('visible');
       pendingTranscript = null;
-      if (out) out.textContent = 'Generating...';
+      if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; }
+      if (out) out.innerHTML = '<span class="path">Generating...</span>';
       try {
         const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: task || text, agent }) });
         const data = await r.json();
         if (data.error) { if (out) out.textContent = 'Error: ' + data.error; return; }
-        if (out) out.innerHTML = 'Task: ' + (task || text) + '\nAgent: ' + agent + '\n<span class="path">Saved: ' + (data.path || data.folder) + '</span>';
+        renderResponse(data, task || text, agent);
       } catch (e) { if (out) out.textContent = 'Error: ' + (e?.message || e); }
       loadHistory();
     });
@@ -344,19 +366,107 @@
       historyList.innerHTML = filtered.length
         ? filtered.map(({ folder, task, agent, created }) => {
             const date = created ? new Date(created).toLocaleString() : folder.slice(0, 16);
-            return `<li>
+            return `<li class="history-item" data-folder="${escapeHtml(folder)}">
               <span class="history-task">${escapeHtml(task || '(no task)')}</span>
               <span class="history-meta">${escapeHtml(agent)} · ${date}</span>
               <span class="history-folder">${escapeHtml(folder)}</span>
             </li>`;
           }).join('')
         : '<li class="history-empty">' + (q ? 'No matches for "' + escapeHtml(q) + '".' : 'No past sessions yet. Record your first task.') + '</li>';
+      historyList.querySelectorAll('.history-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const folder = el.dataset.folder;
+          if (!folder) return;
+          fetch(API + '/api/conversation/' + encodeURIComponent(folder))
+            .then(r => r.json())
+            .then(conv => { if (conv.error) return; renderDetailPanel(conv); out.innerHTML = ''; })
+            .catch(() => {});
+        });
+      });
     }
 
     function escapeHtml(s) {
       const d = document.createElement('div');
       d.textContent = s;
       return d.innerHTML;
+    }
+
+    function renderResponse(data, task, agent) {
+      const files = data.files || ['main.py', 'requirements.txt', 'README.md'];
+      const reasoning = data.reasoning || '';
+      const rawResponse = data.raw_response || '';
+      const usage = data.usage || {};
+      const usageStr = usage.total_tokens ? `Tokens: ${usage.prompt_tokens || 0} in / ${usage.completion_tokens || 0} out` : '';
+      out.innerHTML = `
+        <div class="response-card">
+          <h4>Saved to <span class="path">${escapeHtml(data.folder || data.path || '')}</span></h4>
+          <div class="response-condensed"><strong>Files:</strong> ${escapeHtml(files.join(', '))}</div>
+          ${usageStr ? '<div class="response-condensed">' + usageStr + '</div>' : ''}
+          ${reasoning ? '<div class="response-condensed">' + escapeHtml(reasoning.slice(0, 120)) + (reasoning.length > 120 ? '…' : '') + '</div>' : ''}
+          <div class="response-toggle" data-expanded="0">▼ Show full reasoning & code</div>
+          <div class="response-expanded" id="response-expanded">
+            ${reasoning ? '<p><strong>Reasoning:</strong></p><pre class="code-block">' + escapeHtml(reasoning) + '</pre>' : ''}
+            ${rawResponse ? '<p><strong>Full LLM response:</strong></p><pre class="code-block">' + escapeHtml(rawResponse) + '</pre>' : ''}
+          </div>
+        </div>`;
+      out.querySelector('.response-toggle').addEventListener('click', function() {
+        const exp = out.querySelector('#response-expanded');
+        const isExp = exp.classList.toggle('visible');
+        this.textContent = isExp ? '▲ Hide' : '▼ Show full reasoning & code';
+      });
+    }
+
+    function renderDetailPanel(conv) {
+      if (!detailPanel) return;
+      const meta = conv.metadata || {};
+      const files = conv.files || {};
+      const fileNames = Object.keys(files);
+      const reasoning = meta.reasoning || '';
+      const rawResponse = meta.raw_response || '';
+      detailPanel.classList.add('visible');
+      detailPanel.innerHTML = `
+        <h3>${escapeHtml(meta.task || conv.folder)}</h3>
+        <div><small>${escapeHtml(meta.agent || '')} · ${escapeHtml(conv.folder)}</small></div>
+        <p><strong>Files:</strong> ${escapeHtml(fileNames.join(', '))}</p>
+        ${reasoning ? '<p class="response-condensed">' + escapeHtml(reasoning.slice(0, 150)) + (reasoning.length > 150 ? '…' : '') + '</p>' : ''}
+        <div class="response-toggle" id="detail-expand">▼ Show code & full reasoning</div>
+        <div class="response-expanded" id="detail-expanded">
+          ${Object.entries(files).map(([name, content]) => '<p><strong>' + escapeHtml(name) + '</strong></p><pre class="code-block">' + escapeHtml(content) + '</pre>').join('')}
+          ${reasoning ? '<p><strong>Reasoning:</strong></p><pre class="code-block">' + escapeHtml(reasoning) + '</pre>' : ''}
+          ${rawResponse ? '<p><strong>Full response:</strong></p><pre class="code-block">' + escapeHtml(rawResponse) + '</pre>' : ''}
+        </div>
+        <div class="detail-actions">
+          <input type="text" id="rename-input" placeholder="New name" value="${escapeHtml((conv.folder || '').replace(/^\d{4}-\d{2}-\d{2}_\d{4}_/, ''))}" />
+          <button id="btn-rename">Rename</button>
+          <button id="btn-delete" style="background:#c0392b;color:white">Delete</button>
+        </div>`;
+      detailPanel.querySelector('#detail-expand').addEventListener('click', function() {
+        const exp = detailPanel.querySelector('#detail-expanded');
+        const isExp = exp.classList.toggle('visible');
+        this.textContent = isExp ? '▲ Hide' : '▼ Show code & full reasoning';
+      });
+      detailPanel.querySelector('#btn-rename').addEventListener('click', async () => {
+        const newName = detailPanel.querySelector('#rename-input').value.trim();
+        if (!newName) return;
+        try {
+          const r = await fetch(API + '/api/conversation/' + encodeURIComponent(conv.folder) + '/rename', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) });
+          const d = await r.json();
+          if (d.error) { alert(d.error); return; }
+          loadHistory();
+          const r2 = await fetch(API + '/api/conversation/' + encodeURIComponent(d.folder));
+          const conv2 = await r2.json();
+          if (!conv2.error) renderDetailPanel(conv2);
+        } catch (e) { alert(e.message); }
+      });
+      detailPanel.querySelector('#btn-delete').addEventListener('click', async () => {
+        if (!confirm('Delete this project and all its files?')) return;
+        try {
+          const r = await fetch(API + '/api/conversation/' + encodeURIComponent(conv.folder), { method: 'DELETE' });
+          const d = await r.json();
+          if (d.ok) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; out.innerHTML = ''; loadHistory(); }
+          else alert(d.error || 'Delete failed');
+        } catch (e) { alert(e.message); }
+      });
     }
 
     loadHistory();

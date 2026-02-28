@@ -9,7 +9,7 @@ from flask_cors import CORS
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
 from code_generator import generate_openai, generate_anthropic
-from conversation_store import save_conversation, list_conversations
+from conversation_store import save_conversation, list_conversations, get_conversation, rename_conversation, delete_conversation
 
 app = Flask(__name__)
 CORS(app)
@@ -43,17 +43,24 @@ def handle_voice():
     task = extract_task(text) or text
     gen = GENERATORS.get(agent, generate_openai)
     try:
-        main_py, requirements, folder_name = gen(task)
+        result = gen(task)
     except Exception as e:
         return jsonify({"error": str(e), "text": text}), 500
 
-    path = save_conversation(main_py, requirements, folder_name, task, agent)
+    path = save_conversation(
+        result["main_py"], result["requirements"], result["folder_name"],
+        task, agent,
+        reasoning=result.get("reasoning", ""),
+        raw_response=result.get("raw_response", ""),
+        usage=result.get("usage", {}),
+    )
+    folder = os.path.basename(path)
     return jsonify({
-        "text": text,
-        "task": task,
-        "agent": agent,
-        "path": path,
-        "folder": os.path.basename(path),
+        "text": text, "task": task, "agent": agent,
+        "path": path, "folder": folder,
+        "files": result.get("files", ["main.py", "requirements.txt", "README.md"]),
+        "reasoning": result.get("reasoning", ""),
+        "usage": result.get("usage", {}),
     })
 
 @app.route("/api/transcribe", methods=["POST"])
@@ -72,6 +79,33 @@ def api_history():
     """List all past conversation sessions."""
     return jsonify(list_conversations())
 
+@app.route("/api/conversation/<path:folder>", methods=["GET"])
+def api_get_conversation(folder):
+    """Get full conversation details."""
+    data = get_conversation(folder)
+    if data is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(data)
+
+@app.route("/api/conversation/<path:folder>/rename", methods=["PUT"])
+def api_rename_conversation(folder):
+    """Rename conversation folder."""
+    data = request.get_json() or {}
+    new_name = data.get("name", "").strip()
+    if not new_name:
+        return jsonify({"error": "Name required"}), 400
+    result = rename_conversation(folder, new_name)
+    if result is None:
+        return jsonify({"error": "Rename failed"}), 400
+    return jsonify({"folder": result})
+
+@app.route("/api/conversation/<path:folder>", methods=["DELETE"])
+def api_delete_conversation(folder):
+    """Delete conversation folder."""
+    if delete_conversation(folder):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Delete failed"}), 400
+
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
     """Generate from text (no audio)."""
@@ -82,11 +116,24 @@ def api_generate():
         return jsonify({"error": "No task"}), 400
     gen = GENERATORS.get(agent, generate_openai)
     try:
-        main_py, requirements, folder_name = gen(task)
+        result = gen(task)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    path = save_conversation(main_py, requirements, folder_name, task, agent)
-    return jsonify({"path": path, "folder": os.path.basename(path)})
+    path = save_conversation(
+        result["main_py"], result["requirements"], result["folder_name"],
+        task, agent,
+        reasoning=result.get("reasoning", ""),
+        raw_response=result.get("raw_response", ""),
+        usage=result.get("usage", {}),
+    )
+    folder = os.path.basename(path)
+    return jsonify({
+        "path": path, "folder": folder,
+        "files": ["main.py", "requirements.txt", "README.md"],
+        "reasoning": result.get("reasoning", ""),
+        "raw_response": result.get("raw_response", ""),
+        "usage": result.get("usage", {}),
+    })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

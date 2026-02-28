@@ -11,12 +11,24 @@ MODELS = {
 }
 
 SYSTEM_PROMPT = """You are an expert coding agent. Given a user task:
-1. Produce runnable Python code.
-2. Always output a main.py and requirements.txt.
-3. Use triple-backtick code blocks with language (e.g. ```python).
-4. At the end, output a single line: FOLDER_NAME: <kebab-case-name>
-   Example: FOLDER_NAME: todo-cli
-The folder name must be short, descriptive, alphanumeric with hyphens only."""
+
+1. First, briefly reason step-by-step about the approach (2-4 sentences).
+2. Then produce runnable Python code.
+3. Always output a main.py and requirements.txt.
+4. Use triple-backtick code blocks with language (e.g. ```python).
+5. At the end, output a single line: FOLDER_NAME: <kebab-case-name>
+
+Example format:
+I'll create a Flask app that... [brief reasoning]
+
+```python
+# main.py
+...
+```
+```requirements.txt
+...
+```
+FOLDER_NAME: todo-cli"""
 
 def _client():
     return OpenAI(
@@ -24,15 +36,15 @@ def _client():
         api_key=os.environ.get("OPENROUTER_API_KEY"),
     )
 
-def generate_openai(task: str) -> tuple[str, str, str]:
+def generate_openai(task: str) -> dict:
     """Generate code via OpenRouter -> GPT."""
     return _generate(task, "openai")
 
-def generate_anthropic(task: str) -> tuple[str, str, str]:
+def generate_anthropic(task: str) -> dict:
     """Generate code via OpenRouter -> Claude."""
     return _generate(task, "anthropic")
 
-def _generate(task: str, agent: str) -> tuple[str, str, str]:
+def _generate(task: str, agent: str) -> dict:
     model = MODELS.get(agent, MODELS["openai"])
     client = _client()
     r = client.chat.completions.create(
@@ -44,27 +56,37 @@ def _generate(task: str, agent: str) -> tuple[str, str, str]:
         max_tokens=4096,
     )
     content = r.choices[0].message.content
-    return _parse_response(content)
+    usage = {}
+    if getattr(r, "usage", None):
+        u = r.usage
+        usage = {"prompt_tokens": getattr(u, "prompt_tokens", 0), "completion_tokens": getattr(u, "completion_tokens", 0), "total_tokens": getattr(u, "total_tokens", 0)}
+    parsed = _parse_response(content)
+    return {"main_py": parsed["main_py"], "requirements": parsed["requirements"], "folder_name": parsed["folder_name"], "reasoning": parsed["reasoning"], "raw_response": content, "usage": usage}
 
-def _parse_response(content: str) -> tuple[str, str, str]:
-    """Extract main.py, requirements.txt, and FOLDER_NAME from LLM response."""
+def _parse_response(content: str) -> dict:
+    """Extract reasoning, main.py, requirements.txt, FOLDER_NAME from LLM response."""
     folder_name = "generated-app"
-    blocks = re.findall(r"```(\w*)\n(.*?)```", content, re.DOTALL)
+    reasoning = ""
+    blocks = list(re.finditer(r"```(\w*)\n(.*?)```", content, re.DOTALL))
+    if blocks:
+        first_block_start = blocks[0].start()
+        reasoning = content[:first_block_start].strip()
+        reasoning = re.sub(r"\n{3,}", "\n\n", reasoning)
     main_py, requirements = "", "flask>=3.0.0\nrequests>=2.31.0\n"
-    for lang, code in blocks:
-        code = code.strip()
+    for m in blocks:
+        lang = (m.group(1) or "python").lower()
+        code = m.group(2).strip()
         if "FOLDER_NAME:" in code:
             continue
-        lang = (lang or "python").lower()
         if "req" in lang or "txt" in lang or "pip" in lang or "requirement" in lang:
             requirements = code if code else requirements
         else:
-            main_py = code if not main_py else main_py  # first python block = main
+            main_py = code if not main_py else main_py
     m = re.search(r"FOLDER_NAME:\s*([a-z0-9\-]+)", content, re.I)
     if m:
         folder_name = m.group(1).strip()
     if not main_py and blocks:
-        main_py = blocks[0][1].strip()
+        main_py = blocks[0].group(2).strip()
     if not main_py:
         main_py = content
-    return main_py, requirements, folder_name
+    return {"main_py": main_py, "requirements": requirements, "folder_name": folder_name, "reasoning": reasoning}
