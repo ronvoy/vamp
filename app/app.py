@@ -9,7 +9,7 @@ from flask_cors import CORS
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
 from code_generator import generate_openai, generate_anthropic, generate_with_model, fetch_models
-from conversation_store import save_conversation, list_conversations, get_conversation, rename_conversation, delete_conversation
+from conversation_store import save_conversation, list_conversations, get_conversation, get_git_diff, rename_conversation, delete_conversation
 
 app = Flask(__name__)
 CORS(app)
@@ -87,7 +87,7 @@ def api_history():
 
 @app.route("/api/conversation/<path:folder>", methods=["GET"])
 def api_get_conversation(folder):
-    """Get full conversation details."""
+    """Get full conversation details with git diffs and history."""
     data = get_conversation(folder)
     if data is None:
         return jsonify({"error": "Not found"}), 404
@@ -151,17 +151,22 @@ def api_generate():
         reasoning=result.get("reasoning", ""),
         raw_response=result.get("raw_response", ""),
         usage=result.get("usage", {}),
+        continue_from=continue_from or "",
     )
     folder = os.path.basename(path)
     file_list = list(result.get("files", {}).keys()) or ["main.py", "requirements.txt", "README.md"]
-    return jsonify({
+    resp = {
         "path": path, "folder": folder,
         "files": file_list,
         "reasoning": result.get("reasoning", ""),
         "raw_response": result.get("raw_response", ""),
         "usage": result.get("usage", {}),
         "task": task, "agent": agent,
-    })
+        "is_continuation": bool(continue_from),
+    }
+    if continue_from:
+        resp["git_diff"] = get_git_diff(folder)
+    return jsonify(resp)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -118,6 +118,34 @@
     .response-expanded.visible { display: block; }
     .code-block { background: #1e1e1e; color: #d4d4d4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-family: 'Consolas','Monaco',monospace; font-size: 0.8rem; white-space: pre; }
     body.dark .code-block { background: #0d0d0d; color: #e0e0e0; }
+
+    .diff-block { background: #1e1e1e; color: #d4d4d4; padding: 0; border-radius: 6px; overflow-x: auto; font-family: 'Consolas','Monaco',monospace; font-size: 0.78rem; margin-bottom: 0.5rem; }
+    body.dark .diff-block { background: #0d0d0d; }
+    .diff-header { padding: 0.5rem 0.75rem; background: #2d333b; color: #8b949e; font-weight: 600; border-radius: 6px 6px 0 0; font-size: 0.8rem; }
+    body.dark .diff-header { background: #161b22; }
+    .diff-line { padding: 0 0.75rem; white-space: pre; min-height: 1.3em; line-height: 1.4; }
+    .diff-add { background: rgba(46, 160, 67, 0.15); color: #3fb950; }
+    .diff-del { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+    .diff-hunk { color: #8b949e; background: rgba(56, 139, 253, 0.1); padding: 0.15rem 0.75rem; }
+    .diff-badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600; margin-left: 0.5rem; }
+    .diff-badge-changed { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
+    .diff-badge-new { background: rgba(46, 160, 67, 0.2); color: #3fb950; }
+    .diff-badge-deleted { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+    .diff-stats { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+    .diff-stats .add-count { color: #3fb950; font-weight: 600; }
+    .diff-stats .del-count { color: #f85149; font-weight: 600; }
+
+    .git-timeline { margin-top: 0.5rem; padding: 0; list-style: none; border-left: 2px solid var(--border); margin-left: 0.5rem; }
+    .git-commit { padding: 0.4rem 0 0.4rem 1rem; position: relative; font-size: 0.8rem; }
+    .git-commit::before {
+      content: ''; position: absolute; left: -6px; top: 0.65rem;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--path-color); border: 2px solid var(--bg);
+    }
+    .git-commit:first-child::before { background: var(--record-bg); }
+    .git-hash { font-family: 'Consolas','Monaco',monospace; color: var(--path-color); font-size: 0.75rem; }
+    .git-msg { color: var(--text); }
+    .git-date { color: var(--text-muted); font-size: 0.7rem; }
     .detail-panel { display: none; width: 100%; box-sizing: border-box; }
     .detail-panel.visible { display: block; width: 100%; margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; border: 1px solid var(--border); }
     .detail-panel h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
@@ -486,6 +514,8 @@
         const data = await r.json();
         if (data.error) { if (out) out.textContent = 'Error: ' + data.error; return; }
         renderResponse(data, editedTask, data.agent || pendingTranscript?.agent || '');
+        continueContext = data.folder;
+        if (btnContinue) btnContinue.classList.add('visible');
       } catch (e) { if (out) out.textContent = 'Error: ' + (e?.message || e); }
       loadHistory();
     });
@@ -544,29 +574,74 @@
       return d.innerHTML;
     }
 
+    function renderDiffHtml(diffs) {
+      if (!diffs || !Object.keys(diffs).length) return '';
+      let html = '';
+      for (const [fname, lines] of Object.entries(diffs)) {
+        let adds = 0, dels = 0;
+        const lineHtml = lines.map(line => {
+          const esc = escapeHtml(line);
+          if (line.startsWith('+++') || line.startsWith('---')) return `<div class="diff-line diff-hunk">${esc}</div>`;
+          if (line.startsWith('@@')) return `<div class="diff-line diff-hunk">${esc}</div>`;
+          if (line.startsWith('+')) { adds++; return `<div class="diff-line diff-add">${esc}</div>`; }
+          if (line.startsWith('-')) { dels++; return `<div class="diff-line diff-del">${esc}</div>`; }
+          if (line.startsWith(' ')) return `<div class="diff-line">${esc}</div>`;
+          return `<div class="diff-line">${esc}</div>`;
+        }).join('');
+        const badge = dels === 0 ? '<span class="diff-badge diff-badge-new">NEW</span>'
+          : adds === 0 ? '<span class="diff-badge diff-badge-deleted">DELETED</span>'
+          : '<span class="diff-badge diff-badge-changed">CHANGED</span>';
+        html += `<div class="diff-block">
+          <div class="diff-header">${escapeHtml(fname)} ${badge}</div>
+          <div class="diff-stats" style="padding:0.25rem 0.75rem"><span class="add-count">+${adds}</span> <span class="del-count">-${dels}</span></div>
+          ${lineHtml}
+        </div>`;
+      }
+      return html;
+    }
+
+    function renderGitTimeline(commits) {
+      if (!commits || !commits.length) return '';
+      return '<ul class="git-timeline">' + commits.map(c =>
+        `<li class="git-commit">
+          <span class="git-hash">${escapeHtml(c.hash)}</span>
+          <span class="git-msg">${escapeHtml(c.message)}</span><br>
+          <span class="git-date">${escapeHtml(c.date)}</span>
+        </li>`
+      ).reverse().join('') + '</ul>';
+    }
+
     function renderResponse(data, task, agent) {
       const files = data.files || ['main.py', 'requirements.txt', 'README.md'];
       const reasoning = data.reasoning || '';
       const rawResponse = data.raw_response || '';
       const usage = data.usage || {};
+      const gitDiff = data.git_diff || null;
+      const isCont = data.is_continuation || false;
       const usageStr = usage.total_tokens ? `Tokens: ${usage.prompt_tokens || 0} in / ${usage.completion_tokens || 0} out` : '';
+      const diffHtml = renderDiffHtml(gitDiff);
+      const hasDiffs = !!diffHtml;
       out.innerHTML = `
         <div class="response-card">
-          <h4>Saved to <span class="path">${escapeHtml(data.folder || data.path || '')}</span></h4>
+          <h4>${isCont ? 'Updated' : 'Saved to'} <span class="path">${escapeHtml(data.folder || data.path || '')}</span></h4>
           <div class="response-condensed"><strong>Files:</strong> ${escapeHtml(files.join(', '))}</div>
           ${usageStr ? '<div class="response-condensed">' + usageStr + '</div>' : ''}
           ${reasoning ? '<div class="response-condensed">' + escapeHtml(reasoning.slice(0, 120)) + (reasoning.length > 120 ? '…' : '') + '</div>' : ''}
-          <div class="response-toggle" data-expanded="0">▼ Show full reasoning & code</div>
-          <div class="response-expanded" id="response-expanded">
-            ${reasoning ? '<p><strong>Reasoning:</strong></p><pre class="code-block">' + escapeHtml(reasoning) + '</pre>' : ''}
-            ${rawResponse ? '<p><strong>Full LLM response:</strong></p><pre class="code-block">' + escapeHtml(rawResponse) + '</pre>' : ''}
-          </div>
+          ${hasDiffs ? '<div class="response-toggle" id="resp-diff-toggle">▼ Show changes (git diff)</div><div class="response-expanded" id="resp-diff-expanded">' + diffHtml + '</div>' : ''}
+          ${reasoning ? '<div class="response-toggle" id="resp-reason-toggle">▼ Show reasoning</div><div class="response-expanded" id="resp-reason-expanded"><pre class="code-block">' + escapeHtml(reasoning) + '</pre></div>' : ''}
+          ${rawResponse ? '<div class="response-toggle" id="resp-code-toggle">▼ Show full LLM response</div><div class="response-expanded" id="resp-code-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
         </div>`;
-      out.querySelector('.response-toggle').addEventListener('click', function() {
-        const exp = out.querySelector('#response-expanded');
-        const isExp = exp.classList.toggle('visible');
-        this.textContent = isExp ? '▲ Hide' : '▼ Show full reasoning & code';
-      });
+      const bind = (sel, expSel, showText, hideText) => {
+        const el = out.querySelector(sel);
+        if (el) el.addEventListener('click', function() {
+          const exp = out.querySelector(expSel);
+          const isExp = exp.classList.toggle('visible');
+          this.textContent = isExp ? hideText : showText;
+        });
+      };
+      bind('#resp-diff-toggle', '#resp-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
+      bind('#resp-reason-toggle', '#resp-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
+      bind('#resp-code-toggle', '#resp-code-expanded', '▼ Show full LLM response', '▲ Hide LLM response');
     }
 
     function renderDetailPanel(conv) {
@@ -578,28 +653,45 @@
       const fileNames = Object.keys(files);
       const reasoning = meta.reasoning || '';
       const rawResponse = meta.raw_response || '';
+      const gitDiff = conv.git_diff || {};
+      const gitLog = conv.git_log || [];
+      const diffHtml = renderDiffHtml(gitDiff);
+      const hasDiffs = !!diffHtml;
+      const hasTimeline = gitLog.length > 0;
+      const timelineHtml = renderGitTimeline(gitLog);
       detailPanel.classList.add('visible');
       detailPanel.innerHTML = `
         <h3>${escapeHtml(meta.task || conv.folder)}</h3>
         <div><small>${escapeHtml(meta.agent || '')} · ${escapeHtml(conv.folder)}</small></div>
         <p><strong>Files:</strong> ${escapeHtml(fileNames.join(', '))}</p>
         ${reasoning ? '<p class="response-condensed">' + escapeHtml(reasoning.slice(0, 150)) + (reasoning.length > 150 ? '…' : '') + '</p>' : ''}
-        <div class="response-toggle" id="detail-expand">▼ Show code & full reasoning</div>
-        <div class="response-expanded" id="detail-expanded">
+        ${hasDiffs ? '<div class="response-toggle" id="detail-diff-toggle">▼ Show changes (git diff)</div><div class="response-expanded" id="detail-diff-expanded">' + diffHtml + '</div>' : ''}
+        ${hasTimeline ? '<div class="response-toggle" id="detail-timeline-toggle">▼ Show git history (' + gitLog.length + ' commits)</div><div class="response-expanded" id="detail-timeline-expanded">' + timelineHtml + '</div>' : ''}
+        <div class="response-toggle" id="detail-code-expand">▼ Show code</div>
+        <div class="response-expanded" id="detail-code-expanded">
           ${Object.entries(files).map(([name, content]) => '<p><strong>' + escapeHtml(name) + '</strong></p><pre class="code-block">' + escapeHtml(content) + '</pre>').join('')}
-          ${reasoning ? '<p><strong>Reasoning:</strong></p><pre class="code-block">' + escapeHtml(reasoning) + '</pre>' : ''}
-          ${rawResponse ? '<p><strong>Full response:</strong></p><pre class="code-block">' + escapeHtml(rawResponse) + '</pre>' : ''}
         </div>
+        ${reasoning ? '<div class="response-toggle" id="detail-reason-expand">▼ Show reasoning</div><div class="response-expanded" id="detail-reason-expanded"><pre class="code-block">' + escapeHtml(reasoning) + '</pre></div>' : ''}
+        ${rawResponse ? '<div class="response-toggle" id="detail-raw-expand">▼ Show full LLM response</div><div class="response-expanded" id="detail-raw-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
         <div class="detail-actions">
           <input type="text" id="rename-input" placeholder="New name" value="${escapeHtml((conv.folder || '').replace(/^\d{4}-\d{2}-\d{2}_\d{4}_/, ''))}" />
           <button id="btn-rename">Rename</button>
           <button id="btn-delete" style="background:#c0392b;color:white">Delete</button>
         </div>`;
-      detailPanel.querySelector('#detail-expand').addEventListener('click', function() {
-        const exp = detailPanel.querySelector('#detail-expanded');
-        const isExp = exp.classList.toggle('visible');
-        this.textContent = isExp ? '▲ Hide' : '▼ Show code & full reasoning';
-      });
+      const detailBind = (sel, expSel, showText, hideText) => {
+        const el = detailPanel.querySelector(sel);
+        if (el) el.addEventListener('click', function() {
+          const exp = detailPanel.querySelector(expSel);
+          const isExp = exp.classList.toggle('visible');
+          this.textContent = isExp ? hideText : showText;
+        });
+      };
+      detailBind('#detail-diff-toggle', '#detail-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
+      detailBind('#detail-timeline-toggle', '#detail-timeline-expanded',
+        '▼ Show git history (' + gitLog.length + ' commits)', '▲ Hide git history');
+      detailBind('#detail-code-expand', '#detail-code-expanded', '▼ Show code', '▲ Hide code');
+      detailBind('#detail-reason-expand', '#detail-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
+      detailBind('#detail-raw-expand', '#detail-raw-expanded', '▼ Show full LLM response', '▲ Hide LLM response');
       detailPanel.querySelector('#btn-rename').addEventListener('click', async () => {
         const newName = detailPanel.querySelector('#rename-input').value.trim();
         if (!newName) return;
