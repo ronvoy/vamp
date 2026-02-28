@@ -38,13 +38,15 @@
     }
     body.sidebar-open #sidebar-rail { width: 0; overflow: hidden; padding: 0; }
 
-    .main { flex: 1; padding: 2rem; padding-top: 3.5rem; max-width: 600px; min-width: 0; margin-left: 5rem; transition: margin-left 0.2s ease; }
+    .main { flex: 1; width: 100%; max-width: 100%; padding: 2rem; padding-top: 3.5rem; padding-right: 4rem; min-width: 0; margin-left: 5rem; transition: margin-left 0.2s ease; }
     body.sidebar-open .main { margin-left: min(300px, 85vw); }
     @media (max-width: 768px) {
       #sidebar-rail { width: 3.5rem; padding-left: 0.35rem; }
-      .main { margin-left: 3.5rem; padding: 1rem; padding-top: 3rem; }
-      body.sidebar-open .main { margin-left: 0; }
+      .main { margin-left: 3.5rem; padding: 1rem; padding-top: 3rem; width: 100%; }
+      body.sidebar-open .main { margin-left: 0; padding-left: 1rem; padding-right: 3rem; }
+      .main { padding-right: 3rem; }
       h1 { font-size: 1.5rem; }
+      .detail-panel.visible { padding: 0.75rem; }
     }
 
     h1 { color: var(--text); margin-top: 0; }
@@ -53,11 +55,6 @@
     #record { background: var(--record-bg); color: white; width: 100%; max-width: 280px; }
     #record.recording { background: var(--record-bg-hover); animation: pulse 1s infinite; }
     @keyframes pulse { 50% { opacity: 0.8; } }
-    #live-transcript {
-      margin-top: 1rem; min-height: 60px; padding: 1rem; background: var(--output-bg);
-      border-radius: 8px; font-size: 0.95rem; white-space: pre-wrap; color: var(--text);
-    }
-    #live-transcript.recording:empty::before { content: 'Listening...'; color: var(--text-muted); font-style: italic; }
     #preview-box {
       display: none; margin-top: 1rem; padding: 1rem; background: var(--output-bg);
       border-radius: 8px; border: 1px solid var(--border);
@@ -81,8 +78,8 @@
     .response-expanded.visible { display: block; }
     .code-block { background: #1e1e1e; color: #d4d4d4; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-family: 'Consolas','Monaco',monospace; font-size: 0.8rem; white-space: pre; }
     body.dark .code-block { background: #0d0d0d; color: #e0e0e0; }
-    .detail-panel { display: none; }
-    .detail-panel.visible { display: block; margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; border: 1px solid var(--border); }
+    .detail-panel { display: none; width: 100%; box-sizing: border-box; }
+    .detail-panel.visible { display: block; width: 100%; margin-top: 1rem; padding: 1rem; background: var(--output-bg); border-radius: 8px; border: 1px solid var(--border); }
     .detail-panel h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
     .detail-actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .detail-actions input { padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; flex: 1; min-width: 120px; }
@@ -181,7 +178,6 @@
     <div id="record-wrap">
       <button id="record">Hold to record</button>
     </div>
-    <div id="live-transcript"></div>
     <div id="preview-box">
       <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Edit your prompt if needed:</label>
       <textarea id="preview-text" placeholder="Transcribed text..."></textarea>
@@ -198,7 +194,6 @@
     const API = window.location.origin;
     const rec = document.getElementById('record');
     const recordWrap = document.getElementById('record-wrap');
-    const liveTranscript = document.getElementById('live-transcript');
     const previewBox = document.getElementById('preview-box');
     const previewText = document.getElementById('preview-text');
     const btnSend = document.getElementById('btn-send');
@@ -213,8 +208,6 @@
 
     let allItems = [], searchTimeout;
     let pendingTranscript = null;
-    let SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let speechRec = null;
 
     if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
     themeBtn.addEventListener('click', () => {
@@ -258,8 +251,6 @@
           if (recordWrap) recordWrap.classList.add('recording');
           rec.classList.add('recording');
           rec.textContent = 'Recording... release when done';
-          if (liveTranscript) { liveTranscript.textContent = ''; liveTranscript.classList.add('recording'); }
-          startLiveTranscript();
           document.addEventListener('mouseup', onPointerUp);
           document.addEventListener('touchend', onPointerUp);
           document.addEventListener('touchcancel', onPointerUp);
@@ -274,8 +265,6 @@
       if (recordWrap) recordWrap.classList.remove('recording');
       rec.classList.remove('recording');
       rec.textContent = 'Hold to record';
-      stopLiveTranscript();
-      if (liveTranscript) { liveTranscript.textContent = ''; liveTranscript.classList.remove('recording'); }
       if (!chunks?.length) return;
 
       if (previewBox) previewBox.classList.remove('visible');
@@ -318,31 +307,6 @@
       pendingTranscript = null;
       if (out) out.textContent = '';
     });
-
-    function startLiveTranscript() {
-      if (liveTranscript) liveTranscript.textContent = '';
-      if (!SpeechRec) { if (liveTranscript) liveTranscript.textContent = 'Speaking... (server will transcribe after release)'; return; }
-      try {
-        speechRec = new SpeechRec();
-      } catch (err) { return; }
-      speechRec.continuous = true;
-      speechRec.interimResults = true;
-      speechRec.lang = 'en-US';
-      speechRec.onresult = (e) => {
-        let full = '', interim = '';
-        for (let i = 0; i < e.results.length; i++) {
-          const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) full += t;
-          else interim = t;
-        }
-        if (liveTranscript) liveTranscript.textContent = full + interim;
-      };
-      try { speechRec.start(); } catch (err) { /* ignore */ }
-    }
-    function stopLiveTranscript() {
-      if (speechRec) { speechRec.stop(); speechRec = null; }
-    }
-
 
     async function loadHistory() {
       try {
