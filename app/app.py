@@ -8,7 +8,7 @@ from flask_cors import CORS
 
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
-from code_generator import generate_openai, generate_anthropic
+from code_generator import generate_openai, generate_anthropic, generate_with_model, fetch_models
 from conversation_store import save_conversation, list_conversations, get_conversation, rename_conversation, delete_conversation
 
 app = Flask(__name__)
@@ -75,6 +75,11 @@ def api_transcribe():
     task = extract_task(text) or text
     return jsonify({"text": text, "agent": agent, "task": task})
 
+@app.route("/api/models", methods=["GET"])
+def api_models():
+    """Return all available OpenRouter models with pricing."""
+    return jsonify(fetch_models())
+
 @app.route("/api/history", methods=["GET"])
 def api_history():
     """List all past conversation sessions."""
@@ -127,11 +132,19 @@ def api_generate():
                 if content and "(binary" not in str(content):
                     parts.append(f"\n{name}:\n```\n{content}\n```")
             context = "\n".join(parts)
-    gen = GENERATORS.get(agent, generate_openai)
-    try:
-        result = gen(task, context=context)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    selected_model = data.get("model")
+    if selected_model:
+        try:
+            result = generate_with_model(task, selected_model, context=context)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        agent = selected_model
+    else:
+        gen = GENERATORS.get(agent, generate_openai)
+        try:
+            result = gen(task, context=context)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
     path = save_conversation(
         result["files"], result["folder_name"],
         task, agent,

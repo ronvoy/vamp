@@ -1,14 +1,56 @@
 """Generate code and folder name via OpenRouter (unified LLM API)."""
 import os
 import re
+import time
+import requests as _requests
 from openai import OpenAI
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-MODELS = {
+DEFAULT_MODEL = "openai/gpt-4o-mini"
+
+AGENT_MODELS = {
     "openai": "openai/gpt-4o-mini",
     "anthropic": "anthropic/claude-3-5-haiku",
 }
+
+_models_cache: dict = {"data": None, "ts": 0}
+CACHE_TTL = 3600
+
+def fetch_models() -> list[dict]:
+    """Fetch all models from OpenRouter, cached for CACHE_TTL seconds."""
+    now = time.time()
+    if _models_cache["data"] and now - _models_cache["ts"] < CACHE_TTL:
+        return _models_cache["data"]
+    try:
+        r = _requests.get(
+            f"{OPENROUTER_BASE}/models",
+            headers={"Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY', '')}"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        raw = r.json().get("data", [])
+        models = []
+        for m in raw:
+            mid = m.get("id", "")
+            if mid.endswith(":free"):
+                continue
+            pricing = m.get("pricing") or {}
+            prompt_cost = float(pricing.get("prompt", "0") or "0")
+            completion_cost = float(pricing.get("completion", "0") or "0")
+            models.append({
+                "id": mid,
+                "name": m.get("name", mid),
+                "context_length": m.get("context_length", 0),
+                "prompt_cost": prompt_cost,
+                "completion_cost": completion_cost,
+            })
+        models.sort(key=lambda x: (x["prompt_cost"], x["name"]))
+        _models_cache["data"] = models
+        _models_cache["ts"] = now
+        return models
+    except Exception:
+        return _models_cache["data"] or []
 
 SYSTEM_PROMPT = """You are an expert coding agent. Given a user task:
 
@@ -55,16 +97,20 @@ def _client():
         api_key=os.environ.get("OPENROUTER_API_KEY"),
     )
 
-def generate_openai(task: str, context: str | None = None) -> dict:
+def generate_openai(task: str, context: str | None = None, model_id: str | None = None) -> dict:
     """Generate code via OpenRouter -> GPT."""
-    return _generate(task, "openai", context)
+    return _generate(task, "openai", context, model_id)
 
-def generate_anthropic(task: str, context: str | None = None) -> dict:
+def generate_anthropic(task: str, context: str | None = None, model_id: str | None = None) -> dict:
     """Generate code via OpenRouter -> Claude."""
-    return _generate(task, "anthropic", context)
+    return _generate(task, "anthropic", context, model_id)
 
-def _generate(task: str, agent: str, context: str | None = None) -> dict:
-    model = MODELS.get(agent, MODELS["openai"])
+def generate_with_model(task: str, model_id: str, context: str | None = None) -> dict:
+    """Generate code with an explicit OpenRouter model ID."""
+    return _generate(task, "custom", context, model_id)
+
+def _generate(task: str, agent: str, context: str | None = None, model_id: str | None = None) -> dict:
+    model = model_id or AGENT_MODELS.get(agent, DEFAULT_MODEL)
     client = _client()
     user_content = f"Task: {task}"
     if context:

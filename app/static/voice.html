@@ -69,6 +69,41 @@
     #btn-continue { padding: 0.6rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); display: none; }
     #btn-continue.visible { display: inline-flex; }
     #btn-continue:hover { background: var(--output-bg); color: var(--text); }
+
+    #model-selector { position: relative; flex: 1; min-width: 180px; max-width: 360px; }
+    #model-search {
+      width: 100%; padding: 0.55rem 0.75rem; font-size: 0.85rem;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg); color: var(--text); outline: none;
+    }
+    #model-search::placeholder { color: var(--text-muted); }
+    #model-search:focus { border-color: var(--path-color); }
+    #model-dropdown {
+      display: none; position: absolute; top: 100%; left: 0; right: 0;
+      max-height: 320px; overflow-y: auto; z-index: 20;
+      background: var(--bg); border: 1px solid var(--border); border-top: none;
+      border-radius: 0 0 8px 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    #model-dropdown.visible { display: block; }
+    .model-item {
+      padding: 0.5rem 0.75rem; cursor: pointer; display: flex; flex-direction: column;
+      gap: 0.15rem; border-bottom: 1px solid var(--border); font-size: 0.82rem;
+    }
+    .model-item:last-child { border-bottom: none; }
+    .model-item:hover, .model-item.highlighted { background: var(--output-bg); }
+    .model-item.selected { background: var(--path-color); color: white; }
+    .model-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .model-meta { font-size: 0.72rem; color: var(--text-muted); display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .model-item.selected .model-meta { color: rgba(255,255,255,0.8); }
+    .model-cheap { color: var(--path-color); font-weight: 600; }
+    .model-item.selected .model-cheap { color: #fff; }
+    #model-clear {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 0.9rem; padding: 0.2rem 0.4rem; display: none; line-height: 1;
+    }
+    #model-clear.visible { display: block; }
+
     #output { margin-top: 1rem; }
     .path { color: var(--path-color); font-weight: bold; }
     .response-card {
@@ -183,6 +218,11 @@
     <div id="record-wrap">
       <button id="btn-clear" title="Clear chat & start new">+</button>
       <button id="record">Hold to record</button>
+      <div id="model-selector">
+        <input type="text" id="model-search" placeholder="Model: auto (gpt-4o-mini)" autocomplete="off" spellcheck="false" />
+        <button id="model-clear" title="Clear model selection">✕</button>
+        <div id="model-dropdown"></div>
+      </div>
     </div>
     <div id="preview-box">
       <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Type or edit your prompt:</label>
@@ -217,6 +257,13 @@
     let allItems = [], searchTimeout;
     let pendingTranscript = null;
     let continueContext = null;
+    let selectedModel = null;
+    let allModels = [];
+    let highlightIdx = -1;
+
+    const modelSearch = document.getElementById('model-search');
+    const modelDropdown = document.getElementById('model-dropdown');
+    const modelClear = document.getElementById('model-clear');
 
     if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
     themeBtn.addEventListener('click', () => {
@@ -225,6 +272,126 @@
       themeBtn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌓';
     });
     themeBtn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌓';
+
+    function formatCost(costPerToken) {
+      if (!costPerToken || costPerToken === 0) return 'Free';
+      const perMillion = costPerToken * 1_000_000;
+      if (perMillion < 0.01) return '<$0.01/M';
+      return '$' + perMillion.toFixed(2) + '/M';
+    }
+
+    function formatCtx(ctx) {
+      if (!ctx) return '';
+      if (ctx >= 1_000_000) return (ctx / 1_000_000).toFixed(1) + 'M ctx';
+      if (ctx >= 1000) return Math.round(ctx / 1000) + 'K ctx';
+      return ctx + ' ctx';
+    }
+
+    async function loadModels() {
+      try {
+        const r = await fetch(API + '/api/models');
+        allModels = await r.json();
+      } catch (e) { allModels = []; }
+    }
+
+    function renderModelDropdown(query) {
+      const q = (query || '').toLowerCase();
+      const filtered = q
+        ? allModels.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+        : allModels;
+      const show = filtered.slice(0, 80);
+      highlightIdx = -1;
+      if (!show.length) {
+        modelDropdown.innerHTML = '<div class="model-item" style="color:var(--text-muted);cursor:default"><span class="model-name">No models found</span></div>';
+        modelDropdown.classList.add('visible');
+        return;
+      }
+      modelDropdown.innerHTML = show.map((m, i) => {
+        const sel = selectedModel === m.id ? ' selected' : '';
+        const costIn = formatCost(m.prompt_cost);
+        const costOut = formatCost(m.completion_cost);
+        const ctx = formatCtx(m.context_length);
+        const isCheap = m.prompt_cost > 0 && m.prompt_cost * 1_000_000 < 0.5;
+        return `<div class="model-item${sel}" data-idx="${i}" data-id="${escapeHtml(m.id)}">
+          <span class="model-name">${escapeHtml(m.name)}</span>
+          <span class="model-meta">
+            <span>${escapeHtml(m.id)}</span>
+            ${isCheap ? '<span class="model-cheap">CHEAP</span>' : ''}
+            <span>In: ${costIn}</span><span>Out: ${costOut}</span>
+            ${ctx ? '<span>' + ctx + '</span>' : ''}
+          </span>
+        </div>`;
+      }).join('');
+      if (filtered.length > 80) {
+        modelDropdown.innerHTML += `<div class="model-item" style="color:var(--text-muted);cursor:default;text-align:center"><span class="model-name">${filtered.length - 80} more — type to narrow</span></div>`;
+      }
+      modelDropdown.classList.add('visible');
+      modelDropdown.querySelectorAll('.model-item[data-id]').forEach(el => {
+        el.addEventListener('click', () => pickModel(el.dataset.id));
+      });
+    }
+
+    function pickModel(id) {
+      const m = allModels.find(x => x.id === id);
+      if (!m) return;
+      selectedModel = m.id;
+      modelSearch.value = m.name;
+      modelDropdown.classList.remove('visible');
+      modelClear.classList.add('visible');
+    }
+
+    function clearModel() {
+      selectedModel = null;
+      modelSearch.value = '';
+      modelSearch.placeholder = 'Model: auto (gpt-4o-mini)';
+      modelClear.classList.remove('visible');
+      modelDropdown.classList.remove('visible');
+    }
+
+    modelSearch.addEventListener('focus', () => {
+      if (!allModels.length) loadModels().then(() => renderModelDropdown(modelSearch.value));
+      else renderModelDropdown(modelSearch.value);
+    });
+
+    modelSearch.addEventListener('input', () => {
+      if (selectedModel && modelSearch.value !== allModels.find(m => m.id === selectedModel)?.name) {
+        selectedModel = null;
+        modelClear.classList.remove('visible');
+      }
+      renderModelDropdown(modelSearch.value);
+    });
+
+    modelSearch.addEventListener('keydown', (e) => {
+      const items = modelDropdown.querySelectorAll('.model-item[data-id]');
+      if (!items.length) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        highlightIdx = Math.min(highlightIdx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('highlighted', i === highlightIdx));
+        items[highlightIdx]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        highlightIdx = Math.max(highlightIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('highlighted', i === highlightIdx));
+        items[highlightIdx]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (highlightIdx >= 0 && items[highlightIdx]) pickModel(items[highlightIdx].dataset.id);
+      } else if (e.key === 'Escape') {
+        modelDropdown.classList.remove('visible');
+        modelSearch.blur();
+      }
+    });
+
+    modelClear.addEventListener('click', clearModel);
+
+    document.addEventListener('click', (e) => {
+      if (!document.getElementById('model-selector').contains(e.target)) {
+        modelDropdown.classList.remove('visible');
+      }
+    });
+
+    loadModels();
 
     rec.addEventListener('mousedown', (e) => { e.preventDefault(); start(e); });
     rec.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); });
@@ -313,6 +480,7 @@
       if (!continueContext) { if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; } }
       if (out) out.innerHTML = '<span class="path">Generating...</span>';
       const body = { task: editedTask, continue_from: continueContext || null };
+      if (selectedModel) body.model = selectedModel;
       try {
         const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await r.json();
