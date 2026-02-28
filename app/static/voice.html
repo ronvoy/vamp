@@ -312,8 +312,7 @@
       pendingTranscript = null;
       if (!continueContext) { if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; } }
       if (out) out.innerHTML = '<span class="path">Generating...</span>';
-      const body = { task: editedTask };
-      if (continueContext) body.continue_from = continueContext;
+      const body = { task: editedTask, continue_from: continueContext || null };
       try {
         const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await r.json();
