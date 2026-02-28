@@ -51,7 +51,7 @@
 
     h1 { color: var(--text); margin-top: 0; }
     button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; border-radius: 8px; border: none; }
-    #record-wrap { margin-top: 0.5rem; }
+    #record-wrap { margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; }
     #record { background: var(--record-bg); color: white; width: 100%; max-width: 280px; }
     #record.recording { background: var(--record-bg-hover); animation: pulse 1s infinite; }
     @keyframes pulse { 50% { opacity: 0.8; } }
@@ -64,6 +64,8 @@
     #preview-actions { display: flex; gap: 0.5rem; }
     #btn-send { background: var(--path-color); color: white; }
     #btn-cancel { background: var(--border); color: var(--text); }
+    #btn-clear { padding: 0.6rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); }
+    #btn-clear:hover { background: var(--output-bg); color: var(--text); }
     #output { margin-top: 1rem; }
     .path { color: var(--path-color); font-weight: bold; }
     .response-card {
@@ -176,11 +178,12 @@
     <h1>Vamp — Voice App Maker Pro</h1>
     
     <div id="record-wrap">
+      <button id="btn-clear" title="Clear chat & start new">+</button>
       <button id="record">Hold to record</button>
     </div>
     <div id="preview-box">
-      <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Edit your prompt if needed:</label>
-      <textarea id="preview-text" placeholder="Transcribed text..."></textarea>
+      <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Type or edit your prompt:</label>
+      <textarea id="preview-text"></textarea>
       <div id="preview-actions">
         <button id="btn-send">Send</button>
         <button id="btn-cancel">Cancel</button>
@@ -194,6 +197,7 @@
     const API = window.location.origin;
     const rec = document.getElementById('record');
     const recordWrap = document.getElementById('record-wrap');
+    const btnClear = document.getElementById('btn-clear');
     const previewBox = document.getElementById('preview-box');
     const previewText = document.getElementById('preview-text');
     const btnSend = document.getElementById('btn-send');
@@ -222,6 +226,14 @@
 
     openBtn.addEventListener('click', () => document.body.classList.add('sidebar-open'));
     closeBtn.addEventListener('click', () => document.body.classList.remove('sidebar-open'));
+
+    btnClear.addEventListener('click', () => {
+      if (detailPanel) { detailPanel.classList.remove('visible'); detailPanel.innerHTML = ''; }
+      if (out) out.innerHTML = '';
+      if (previewText) previewText.value = '';
+      pendingTranscript = null;
+      if (previewBox) { previewBox.classList.add('visible'); previewText?.focus(); }
+    });
 
     searchInput.addEventListener('input', () => {
       clearTimeout(searchTimeout);
