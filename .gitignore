@@ -1,13 +1,17 @@
+# Virtual env
 .venv/
+app/.venv/
+
+# Python
 __pycache__/
+app/__pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pyw
-*.pyz
-*.pywz
-*.pyzw
-*.pyzwz
-*.pyzwzw
-*.pyzwzwz
+
+# Environment
 .env
+app/.env
+
+# Generated output
+conversation/

@@ -90,7 +90,7 @@ sequenceDiagram
 | Component | Description | Responsibility |
 |-----------|-------------|----------------|
 | **Voice Capture** | Microphone / browser MediaRecorder or CLI audio input | Streams raw audio to server |
-| **Transcriber** | LLM-based or Whisper API | Converts speech → text, optional translation |
+| **Transcriber** | OpenRouter (Gemini Flash audio) | Converts speech → text via single API |
 | **Command Parser** | Regex or small LLM | Extracts task + agent selector from transcribed text |
 | **Agent Registry** | Map of agent names → OpenRouter model IDs | Routes to correct LLM (GPT-4, Claude, etc.) via OpenRouter |
 | **Code Generator** | OpenRouter + selected LLM | Receives task, produces code + folder name via single API |
@@ -146,8 +146,8 @@ vamp/
 
 - Python 3.10+
 - FFmpeg (for audio processing)
-- **OpenRouter API key** — all LLM calls (GPT, Claude, etc.) go through OpenRouter
-- **OpenAI API key** — used only for Whisper transcription
+- **OpenRouter API key** — all LLM calls and voice transcription (Gemini Flash) via single key
+- **FFmpeg** — for audio conversion (webm → wav); often bundled with pydub
 
 ### Quick Start
 
