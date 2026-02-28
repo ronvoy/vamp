@@ -7,7 +7,7 @@ from openai import OpenAI
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+DEFAULT_MODEL = "google/gemma-3-27b-it:free"
 
 AGENT_MODELS = {
     "openai": "openai/gpt-4o-mini",

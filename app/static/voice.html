@@ -219,7 +219,7 @@
       <button id="btn-clear" title="Clear chat & start new">+</button>
       <button id="record">Hold to record</button>
       <div id="model-selector">
-        <input type="text" id="model-search" placeholder="Model: auto (gpt-4o-mini)" autocomplete="off" spellcheck="false" />
+        <input type="text" id="model-search" placeholder="Model: auto (Gemma 3 27B)" autocomplete="off" spellcheck="false" />
         <button id="model-clear" title="Clear model selection">✕</button>
         <div id="model-dropdown"></div>
       </div>
@@ -343,7 +343,7 @@
     function clearModel() {
       selectedModel = null;
       modelSearch.value = '';
-      modelSearch.placeholder = 'Model: auto (gpt-4o-mini)';
+      modelSearch.placeholder = 'Model: auto (Gemma 3 27B)';
       modelClear.classList.remove('visible');
       modelDropdown.classList.remove('visible');
     }
