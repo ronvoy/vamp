@@ -1,4 +1,4 @@
-"""Generate code and folder name via OpenRouter (unified LLM API)."""
+"""Generate a project setup script via OpenRouter LLM."""
 import os
 import re
 import time
@@ -7,7 +7,7 @@ from openai import OpenAI
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-DEFAULT_MODEL = "google/gemma-3-27b-it:free"
+DEFAULT_MODEL = "google/gemma-3-27b-it"
 
 AGENT_MODELS = {
     "openai": "openai/gpt-4o-mini",
@@ -16,6 +16,7 @@ AGENT_MODELS = {
 
 _models_cache: dict = {"data": None, "ts": 0}
 CACHE_TTL = 3600
+
 
 def fetch_models() -> list[dict]:
     """Fetch all models from OpenRouter, cached for CACHE_TTL seconds."""
@@ -52,44 +53,63 @@ def fetch_models() -> list[dict]:
     except Exception:
         return _models_cache["data"] or []
 
-SYSTEM_PROMPT = """You are an expert coding agent. Given a user task:
 
-1. First, briefly reason step-by-step about the approach (2-4 sentences).
-2. Infer the output format from the user's request:
-   - If they ask for HTML, a webpage, web page, or frontend: produce HTML (index.html), optionally with CSS and JS
-   - If they ask for CSS or styles: produce CSS (style.css or styles.css)
-   - If they ask for JavaScript, JS, or client-side script: produce JavaScript (script.js or app.js)
-   - If they ask for Markdown, MD, or documentation: produce Markdown (README.md or document.md)
-   - Otherwise (or if unclear): default to Python with main.py and requirements.txt
-3. Use triple-backtick code blocks with language and optional filename, e.g. ```html, ```css, ```javascript, ```markdown, ```python.
-4. At the end, output two lines:
-   OUTPUT_FORMAT: <html|python|css|javascript|markdown>
-   FOLDER_NAME: <kebab-case-name>
+SYSTEM_PROMPT = r"""You are an expert coding agent. Given a user task, you MUST produce a single bash shell script called `setup.sh` that fully creates the project.
 
-Example (Python, default):
-I'll create a Flask app that... [brief reasoning]
-```python
-# main.py
-...
-```
-```requirements.txt
-...
-```
-OUTPUT_FORMAT: python
-FOLDER_NAME: todo-cli
+The script must:
+1. Create all necessary files using heredocs (cat << 'EOF' > filename)
+2. Use the CORRECT language and file extensions for the platform the user asked for:
+   - iOS/SwiftUI → .swift files
+   - Android → .kt files
+   - Web/frontend → .html, .css, .js files
+   - Python → .py files
+   - Go → .go files
+   - Rust → .rs files
+   - TypeScript/React → .ts/.tsx files
+   - Java → .java files
+   - Any other language → use the correct extension
+3. NEVER default to Python unless the user explicitly asks for Python or doesn't specify a language.
+4. Create a README.md with:
+   - Project description
+   - Project structure (file tree)
+   - What each file does
+   - How to install dependencies
+   - How to build and run
+   - Technologies used
 
-Example (HTML):
-I'll build a simple landing page... [brief reasoning]
-```html
-<!-- index.html -->
+Your response format MUST be:
+
+1. Brief reasoning (2-4 sentences about your approach)
+2. A SINGLE bash code block containing the complete setup.sh:
+
+```bash
+#!/bin/bash
+# setup.sh - <project description>
+
+# Create project files
+cat << 'EOF' > filename.ext
+<file content>
+EOF
+
+cat << 'EOF' > README.md
+# Project Name
 ...
+EOF
+
+echo "Project setup complete!"
 ```
-```css
-/* style.css */
-...
-```
-OUTPUT_FORMAT: html
-FOLDER_NAME: landing-page"""
+
+3. At the end (outside the code block):
+FOLDER_NAME: <kebab-case-name>
+
+CRITICAL RULES:
+- Output ONLY ONE code block containing the bash script
+- Use cat << 'EOF' > filename (with single-quoted EOF to prevent variable expansion)
+- For subdirectories, use mkdir -p before writing files
+- Do NOT use Python/pip unless the user asked for Python
+- Match the language/platform to what the user asked for
+- The script should be self-contained and runnable with `bash setup.sh`"""
+
 
 def _client():
     return OpenAI(
@@ -97,17 +117,18 @@ def _client():
         api_key=os.environ.get("OPENROUTER_API_KEY"),
     )
 
+
 def generate_openai(task: str, context: str | None = None, model_id: str | None = None) -> dict:
-    """Generate code via OpenRouter -> GPT."""
     return _generate(task, "openai", context, model_id)
 
+
 def generate_anthropic(task: str, context: str | None = None, model_id: str | None = None) -> dict:
-    """Generate code via OpenRouter -> Claude."""
     return _generate(task, "anthropic", context, model_id)
 
+
 def generate_with_model(task: str, model_id: str, context: str | None = None) -> dict:
-    """Generate code with an explicit OpenRouter model ID."""
     return _generate(task, "custom", context, model_id)
+
 
 def _generate(task: str, agent: str, context: str | None = None, model_id: str | None = None) -> dict:
     model = model_id or AGENT_MODELS.get(agent, DEFAULT_MODEL)
@@ -121,73 +142,49 @@ def _generate(task: str, agent: str, context: str | None = None, model_id: str |
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
-        max_tokens=4096,
+        max_tokens=8192,
     )
     content = r.choices[0].message.content
     usage = {}
     if getattr(r, "usage", None):
         u = r.usage
-        usage = {"prompt_tokens": getattr(u, "prompt_tokens", 0), "completion_tokens": getattr(u, "completion_tokens", 0), "total_tokens": getattr(u, "total_tokens", 0)}
+        usage = {
+            "prompt_tokens": getattr(u, "prompt_tokens", 0),
+            "completion_tokens": getattr(u, "completion_tokens", 0),
+            "total_tokens": getattr(u, "total_tokens", 0),
+        }
     parsed = _parse_response(content)
-    return {"files": parsed["files"], "folder_name": parsed["folder_name"], "reasoning": parsed["reasoning"], "raw_response": content, "usage": usage}
+    return {
+        "script": parsed["script"],
+        "folder_name": parsed["folder_name"],
+        "reasoning": parsed["reasoning"],
+        "raw_response": content,
+        "usage": usage,
+    }
+
 
 def _parse_response(content: str) -> dict:
-    """Extract reasoning, files (by format), FOLDER_NAME from LLM response."""
+    """Extract the bash script, reasoning, and folder name from LLM response."""
     folder_name = "generated-app"
     reasoning = ""
-    output_format = "python"
-    blocks = list(re.finditer(r"```(\w*)\n(.*?)```", content, re.DOTALL))
+    script = ""
+
+    blocks = list(re.finditer(r"```(?:bash|sh|shell)?\n(.*?)```", content, re.DOTALL))
+
     if blocks:
+        script = blocks[0].group(1).strip()
         first_block_start = blocks[0].start()
         reasoning = content[:first_block_start].strip()
         reasoning = re.sub(r"\n{3,}", "\n\n", reasoning)
-    m_fmt = re.search(r"OUTPUT_FORMAT:\s*(\w+)", content, re.I)
-    if m_fmt:
-        output_format = m_fmt.group(1).strip().lower()
+
     m = re.search(r"FOLDER_NAME:\s*([a-z0-9\-]+)", content, re.I)
     if m:
         folder_name = m.group(1).strip()
-    files: dict[str, str] = {}
-    py_blocks: list[str] = []
-    for m in blocks:
-        lang = (m.group(1) or "python").lower()
-        code = m.group(2).strip()
-        if "FOLDER_NAME:" in code or "OUTPUT_FORMAT:" in code:
-            continue
-        if "req" in lang or lang == "txt" or "pip" in lang or "requirement" in lang:
-            files["requirements.txt"] = code or "flask>=3.0.0\nrequests>=2.31.0\n"
-        elif "html" in lang:
-            files["index.html"] = code
-        elif "css" in lang:
-            files["style.css"] = code
-        elif "javascript" in lang or "js" in lang:
-            files["script.js"] = code
-        elif "markdown" in lang or "md" in lang:
-            files["README.md"] = code
-        elif "python" in lang or lang == "py":
-            py_blocks.append(code)
-        else:
-            if output_format == "python":
-                py_blocks.append(code)
-            elif output_format in ("html", "htm"):
-                files.setdefault("index.html", code)
-            elif output_format in ("markdown", "md"):
-                files.setdefault("README.md", code)
-            elif output_format == "css":
-                files.setdefault("style.css", code)
-            elif output_format in ("javascript", "js"):
-                files.setdefault("script.js", code)
-            else:
-                py_blocks.append(code)
-    if output_format == "python":
-        if py_blocks:
-            files["main.py"] = py_blocks[0]
-        if "requirements.txt" not in files:
-            files["requirements.txt"] = "flask>=3.0.0\nrequests>=2.31.0\n"
-        if "main.py" not in files and blocks:
-            files["main.py"] = blocks[0].group(2).strip()
-        if "main.py" not in files:
-            files["main.py"] = content
-    elif not files and blocks:
-        files["output.txt"] = blocks[0].group(2).strip()
-    return {"files": files, "folder_name": folder_name, "reasoning": reasoning}
+
+    if not script:
+        script = f'#!/bin/bash\necho "Error: No script generated"\n# Raw LLM output saved to raw_response.txt\ncat << \'EOF\' > raw_response.txt\n{content}\nEOF'
+
+    if not script.startswith("#!"):
+        script = "#!/bin/bash\n" + script
+
+    return {"script": script, "folder_name": folder_name, "reasoning": reasoning}

@@ -1,4 +1,4 @@
-"""Flask voice-to-app server: transcribe voice -> select agent -> generate code -> save."""
+"""Flask voice-to-app server: transcribe voice -> select agent -> generate script -> execute -> save."""
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,7 +25,7 @@ def index():
 
 @app.route("/api/voice", methods=["POST"])
 def handle_voice():
-    """Receive audio, transcribe, select agent, generate code, save to conversation/."""
+    """Receive audio, transcribe, select agent, generate script, execute, save."""
     if "audio" not in request.files:
         return jsonify({"error": "No audio file"}), 400
     f = request.files["audio"]
@@ -47,21 +47,22 @@ def handle_voice():
     except Exception as e:
         return jsonify({"error": str(e), "text": text}), 500
 
-    path = save_conversation(
-        result["files"], result["folder_name"],
+    save_result = save_conversation(
+        result["script"], result["folder_name"],
         task, agent,
         reasoning=result.get("reasoning", ""),
         raw_response=result.get("raw_response", ""),
         usage=result.get("usage", {}),
     )
-    folder = os.path.basename(path)
-    file_list = list(result.get("files", {}).keys()) or ["main.py", "requirements.txt", "README.md"]
     return jsonify({
         "text": text, "task": task, "agent": agent,
-        "path": path, "folder": folder,
-        "files": file_list,
+        "path": save_result["path"],
+        "folder": save_result["folder"],
+        "files": save_result["files"],
         "reasoning": result.get("reasoning", ""),
         "usage": result.get("usage", {}),
+        "script_output": save_result.get("script_output", ""),
+        "script_success": save_result.get("script_success", False),
     })
 
 @app.route("/api/transcribe", methods=["POST"])
@@ -114,13 +115,14 @@ def api_delete_conversation(folder):
 
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
-    """Generate from text (no audio). Optional continue_from=folder for context."""
+    """Generate script from text, execute it, save results."""
     data = request.get_json() or {}
     task = data.get("task") or data.get("text", "")
     agent = data.get("agent") or select_agent(task)
     continue_from = data.get("continue_from")
     if not task:
         return jsonify({"error": "No task"}), 400
+
     context = None
     if continue_from:
         conv = get_conversation(continue_from)
@@ -130,8 +132,9 @@ def api_generate():
             parts = [f"Previous task: {meta.get('task', '')}"]
             for name, content in files.items():
                 if content and "(binary" not in str(content):
-                    parts.append(f"\n{name}:\n```\n{content}\n```")
+                    parts.append(f"\n--- {name} ---\n{content}")
             context = "\n".join(parts)
+
     selected_model = data.get("model")
     if selected_model:
         try:
@@ -145,24 +148,29 @@ def api_generate():
             result = gen(task, context=context)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-    path = save_conversation(
-        result["files"], result["folder_name"],
+
+    save_result = save_conversation(
+        result["script"], result["folder_name"],
         task, agent,
         reasoning=result.get("reasoning", ""),
         raw_response=result.get("raw_response", ""),
         usage=result.get("usage", {}),
         continue_from=continue_from or "",
     )
-    folder = os.path.basename(path)
-    file_list = list(result.get("files", {}).keys()) or ["main.py", "requirements.txt", "README.md"]
+
+    folder = save_result["folder"]
     resp = {
-        "path": path, "folder": folder,
-        "files": file_list,
+        "path": save_result["path"],
+        "folder": folder,
+        "files": save_result["files"],
         "reasoning": result.get("reasoning", ""),
         "raw_response": result.get("raw_response", ""),
         "usage": result.get("usage", {}),
-        "task": task, "agent": agent,
+        "task": task,
+        "agent": agent,
         "is_continuation": bool(continue_from),
+        "script_output": save_result.get("script_output", ""),
+        "script_success": save_result.get("script_success", False),
     }
     if continue_from:
         resp["git_diff"] = get_git_diff(folder)

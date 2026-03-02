@@ -612,24 +612,30 @@
     }
 
     function renderResponse(data, task, agent) {
-      const files = data.files || ['main.py', 'requirements.txt', 'README.md'];
+      const files = data.files || [];
       const reasoning = data.reasoning || '';
       const rawResponse = data.raw_response || '';
       const usage = data.usage || {};
       const gitDiff = data.git_diff || null;
       const isCont = data.is_continuation || false;
+      const scriptOutput = data.script_output || '';
+      const scriptOk = data.script_success;
       const usageStr = usage.total_tokens ? `Tokens: ${usage.prompt_tokens || 0} in / ${usage.completion_tokens || 0} out` : '';
       const diffHtml = renderDiffHtml(gitDiff);
       const hasDiffs = !!diffHtml;
+      const statusIcon = scriptOk ? '✓' : '✗';
+      const statusColor = scriptOk ? 'var(--path-color)' : '#e74c3c';
       out.innerHTML = `
         <div class="response-card">
-          <h4>${isCont ? 'Updated' : 'Saved to'} <span class="path">${escapeHtml(data.folder || data.path || '')}</span></h4>
-          <div class="response-condensed"><strong>Files:</strong> ${escapeHtml(files.join(', '))}</div>
+          <h4>${isCont ? 'Updated' : 'Created'} <span class="path">${escapeHtml(data.folder || data.path || '')}</span>
+            <span style="color:${statusColor};margin-left:0.5rem;font-size:0.85rem">${statusIcon} ${scriptOk ? 'Script executed' : 'Script error'}</span></h4>
+          <div class="response-condensed"><strong>Files:</strong> ${escapeHtml(files.join(', ') || 'none')}</div>
           ${usageStr ? '<div class="response-condensed">' + usageStr + '</div>' : ''}
           ${reasoning ? '<div class="response-condensed">' + escapeHtml(reasoning.slice(0, 120)) + (reasoning.length > 120 ? '…' : '') + '</div>' : ''}
+          ${scriptOutput ? '<div class="response-toggle" id="resp-script-toggle">▼ Show script output</div><div class="response-expanded" id="resp-script-expanded"><pre class="code-block">' + escapeHtml(scriptOutput) + '</pre></div>' : ''}
           ${hasDiffs ? '<div class="response-toggle" id="resp-diff-toggle">▼ Show changes (git diff)</div><div class="response-expanded" id="resp-diff-expanded">' + diffHtml + '</div>' : ''}
           ${reasoning ? '<div class="response-toggle" id="resp-reason-toggle">▼ Show reasoning</div><div class="response-expanded" id="resp-reason-expanded"><pre class="code-block">' + escapeHtml(reasoning) + '</pre></div>' : ''}
-          ${rawResponse ? '<div class="response-toggle" id="resp-code-toggle">▼ Show full LLM response</div><div class="response-expanded" id="resp-code-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
+          ${rawResponse ? '<div class="response-toggle" id="resp-code-toggle">▼ Show setup.sh & LLM response</div><div class="response-expanded" id="resp-code-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
         </div>`;
       const bind = (sel, expSel, showText, hideText) => {
         const el = out.querySelector(sel);
@@ -639,9 +645,10 @@
           this.textContent = isExp ? hideText : showText;
         });
       };
+      bind('#resp-script-toggle', '#resp-script-expanded', '▼ Show script output', '▲ Hide script output');
       bind('#resp-diff-toggle', '#resp-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
       bind('#resp-reason-toggle', '#resp-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
-      bind('#resp-code-toggle', '#resp-code-expanded', '▼ Show full LLM response', '▲ Hide LLM response');
+      bind('#resp-code-toggle', '#resp-code-expanded', '▼ Show setup.sh & LLM response', '▲ Hide');
     }
 
     function renderDetailPanel(conv) {
@@ -653,21 +660,28 @@
       const fileNames = Object.keys(files);
       const reasoning = meta.reasoning || '';
       const rawResponse = meta.raw_response || '';
+      const scriptOutput = meta.script_output || '';
+      const scriptOk = meta.script_success;
       const gitDiff = conv.git_diff || {};
       const gitLog = conv.git_log || [];
       const diffHtml = renderDiffHtml(gitDiff);
       const hasDiffs = !!diffHtml;
       const hasTimeline = gitLog.length > 0;
       const timelineHtml = renderGitTimeline(gitLog);
+      const statusIcon = scriptOk ? '✓' : (scriptOk === false ? '✗' : '');
+      const statusColor = scriptOk ? 'var(--path-color)' : '#e74c3c';
       detailPanel.classList.add('visible');
       detailPanel.innerHTML = `
-        <h3>${escapeHtml(meta.task || conv.folder)}</h3>
+        <h3>${escapeHtml(meta.task || conv.folder)}
+          ${statusIcon ? '<span style="color:' + statusColor + ';font-size:0.8rem;margin-left:0.5rem">' + statusIcon + '</span>' : ''}
+        </h3>
         <div><small>${escapeHtml(meta.agent || '')} · ${escapeHtml(conv.folder)}</small></div>
         <p><strong>Files:</strong> ${escapeHtml(fileNames.join(', '))}</p>
         ${reasoning ? '<p class="response-condensed">' + escapeHtml(reasoning.slice(0, 150)) + (reasoning.length > 150 ? '…' : '') + '</p>' : ''}
+        ${scriptOutput ? '<div class="response-toggle" id="detail-script-toggle">▼ Show script output</div><div class="response-expanded" id="detail-script-expanded"><pre class="code-block">' + escapeHtml(scriptOutput) + '</pre></div>' : ''}
         ${hasDiffs ? '<div class="response-toggle" id="detail-diff-toggle">▼ Show changes (git diff)</div><div class="response-expanded" id="detail-diff-expanded">' + diffHtml + '</div>' : ''}
         ${hasTimeline ? '<div class="response-toggle" id="detail-timeline-toggle">▼ Show git history (' + gitLog.length + ' commits)</div><div class="response-expanded" id="detail-timeline-expanded">' + timelineHtml + '</div>' : ''}
-        <div class="response-toggle" id="detail-code-expand">▼ Show code</div>
+        <div class="response-toggle" id="detail-code-expand">▼ Show files</div>
         <div class="response-expanded" id="detail-code-expanded">
           ${Object.entries(files).map(([name, content]) => '<p><strong>' + escapeHtml(name) + '</strong></p><pre class="code-block">' + escapeHtml(content) + '</pre>').join('')}
         </div>
@@ -686,10 +700,11 @@
           this.textContent = isExp ? hideText : showText;
         });
       };
+      detailBind('#detail-script-toggle', '#detail-script-expanded', '▼ Show script output', '▲ Hide script output');
       detailBind('#detail-diff-toggle', '#detail-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
       detailBind('#detail-timeline-toggle', '#detail-timeline-expanded',
         '▼ Show git history (' + gitLog.length + ' commits)', '▲ Hide git history');
-      detailBind('#detail-code-expand', '#detail-code-expanded', '▼ Show code', '▲ Hide code');
+      detailBind('#detail-code-expand', '#detail-code-expanded', '▼ Show files', '▲ Hide files');
       detailBind('#detail-reason-expand', '#detail-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
       detailBind('#detail-raw-expand', '#detail-raw-expanded', '▼ Show full LLM response', '▲ Hide LLM response');
       detailPanel.querySelector('#btn-rename').addEventListener('click', async () => {

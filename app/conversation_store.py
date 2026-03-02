@@ -1,4 +1,4 @@
-"""Save generated code to conversation folder with git tracking at conversation/ level."""
+"""Save setup script, execute it, and track with git."""
 import json
 import os
 import re
@@ -11,7 +11,7 @@ CONV_DIR = os.path.join(BASE_DIR, "conversation")
 
 
 def _run_git(*args: str, cwd: str | None = None) -> str:
-    """Run a git command in CONV_DIR (or override with cwd), return stdout."""
+    """Run a git command in CONV_DIR (or override), return stdout."""
     try:
         r = subprocess.run(
             ["git"] + list(args),
@@ -25,16 +25,14 @@ def _run_git(*args: str, cwd: str | None = None) -> str:
 
 
 def _ensure_conv_git():
-    """Ensure conversation/ has a git repo. Init + initial commit if not."""
+    """Ensure conversation/ has a git repo."""
     os.makedirs(CONV_DIR, exist_ok=True)
     if os.path.isdir(os.path.join(CONV_DIR, ".git")):
         return
     _run_git("init")
     _run_git("checkout", "-b", "main")
-    gitignore_path = os.path.join(CONV_DIR, ".gitignore")
-    if not os.path.isfile(gitignore_path):
-        with open(gitignore_path, "w") as f:
-            f.write("")
+    with open(os.path.join(CONV_DIR, ".gitignore"), "w") as f:
+        f.write("__pycache__/\n*.pyc\nnode_modules/\n.venv/\n")
     _run_git("add", "-A")
     _run_git("commit", "-m", "initial commit")
 
@@ -46,7 +44,6 @@ def _git_commit(message: str, folder: str = "."):
 
 
 def _make_commit_msg(agent: str, reasoning: str, task: str) -> str:
-    """Build a commit message from the LLM reasoning or task."""
     summary = ""
     if reasoning:
         first_line = reasoning.strip().split("\n")[0].strip()
@@ -55,6 +52,47 @@ def _make_commit_msg(agent: str, reasoning: str, task: str) -> str:
     if not summary:
         summary = task[:100]
     return f"{agent}: {summary}"
+
+
+def _run_setup_script(path: str) -> dict:
+    """Execute setup.sh in the given directory, return result."""
+    script_path = os.path.join(path, "setup.sh")
+    if not os.path.isfile(script_path):
+        return {"success": False, "output": "No setup.sh found", "exit_code": -1}
+    try:
+        r = subprocess.run(
+            ["bash", script_path],
+            cwd=path, capture_output=True, text=True, timeout=60,
+        )
+        return {
+            "success": r.returncode == 0,
+            "output": (r.stdout + "\n" + r.stderr).strip(),
+            "exit_code": r.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "output": "Script timed out (60s limit)", "exit_code": -2}
+    except Exception as e:
+        return {"success": False, "output": str(e), "exit_code": -3}
+
+
+def _list_generated_files(path: str) -> list[str]:
+    """List all files in directory (excluding metadata.json and setup.sh)."""
+    files = []
+    for fname in sorted(os.listdir(path)):
+        if fname in ("metadata.json",) or fname.startswith("."):
+            continue
+        fpath = os.path.join(path, fname)
+        if os.path.isfile(fpath):
+            files.append(fname)
+        elif os.path.isdir(fpath):
+            for sub in sorted(os.listdir(fpath)):
+                if os.path.isfile(os.path.join(fpath, sub)):
+                    files.append(f"{fname}/{sub}")
+    return files
+
+
+def sanitize_folder_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9\-]", "", name.lower())[:50] or "generated-app"
 
 
 def list_conversations():
@@ -109,20 +147,16 @@ def _read_meta(path: str) -> dict:
         return {}
 
 
-def sanitize_folder_name(name: str) -> str:
-    return re.sub(r"[^a-z0-9\-]", "", name.lower())[:50] or "generated-app"
-
-
-def save_conversation(files: dict[str, str], folder_name: str, task: str, agent: str,
+def save_conversation(script: str, folder_name: str, task: str, agent: str,
                       reasoning: str = "", raw_response: str = "",
-                      usage: dict = None, continue_from: str = "") -> str:
-    """Save files to conversation folder. If continue_from is set, update existing folder."""
+                      usage: dict = None, continue_from: str = "") -> dict:
+    """Save script, execute it, git commit. Returns full result dict."""
     _ensure_conv_git()
 
     if continue_from:
         existing_path = os.path.join(CONV_DIR, continue_from)
         if os.path.isdir(existing_path):
-            return _update_conversation(existing_path, continue_from, files, task, agent,
+            return _update_conversation(existing_path, continue_from, script, task, agent,
                                         reasoning, raw_response, usage)
 
     name = sanitize_folder_name(folder_name)
@@ -131,19 +165,23 @@ def save_conversation(files: dict[str, str], folder_name: str, task: str, agent:
     path = os.path.join(CONV_DIR, dir_name)
     os.makedirs(path, exist_ok=True)
 
-    file_names = _write_files(path, files)
-    _write_readme_if_missing(path, files, name, task)
-    if "README.md" not in files:
-        file_names.append("README.md")
+    with open(os.path.join(path, "setup.sh"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(script)
+
+    exec_result = _run_setup_script(path)
+
+    file_list = _list_generated_files(path)
 
     meta = {
         "task": task,
         "agent": agent,
         "created": datetime.now().isoformat(),
-        "files": file_names,
+        "files": file_list,
         "reasoning": reasoning or "",
         "raw_response": raw_response or "",
         "usage": usage or {},
+        "script_output": exec_result.get("output", ""),
+        "script_success": exec_result.get("success", False),
         "history": [{
             "task": task,
             "agent": agent,
@@ -155,17 +193,28 @@ def save_conversation(files: dict[str, str], folder_name: str, task: str, agent:
 
     commit_msg = _make_commit_msg(agent, reasoning, task)
     _git_commit(commit_msg, dir_name)
-    return path
+
+    return {
+        "path": path,
+        "folder": dir_name,
+        "files": file_list,
+        "script_output": exec_result.get("output", ""),
+        "script_success": exec_result.get("success", False),
+        "script_exit_code": exec_result.get("exit_code", -1),
+    }
 
 
-def _update_conversation(path: str, folder: str, files: dict[str, str], task: str, agent: str,
+def _update_conversation(path: str, folder: str, script: str, task: str, agent: str,
                          reasoning: str = "", raw_response: str = "",
-                         usage: dict = None) -> str:
-    """Update an existing conversation folder with new files and git commit."""
-    file_names = _write_files(path, files)
+                         usage: dict = None) -> dict:
+    """Update an existing folder: save new script, execute, git commit."""
+    with open(os.path.join(path, "setup.sh"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(script)
+
+    exec_result = _run_setup_script(path)
+
+    file_list = _list_generated_files(path)
     meta = _read_meta(path)
-    existing_files = set(meta.get("files", []))
-    all_files = sorted(existing_files | set(file_names))
 
     history = meta.get("history", [])
     if not history and meta.get("task"):
@@ -179,10 +228,12 @@ def _update_conversation(path: str, folder: str, files: dict[str, str], task: st
     meta.update({
         "task": task,
         "agent": agent,
-        "files": list(all_files),
+        "files": file_list,
         "reasoning": reasoning or "",
         "raw_response": raw_response or "",
         "usage": usage or {},
+        "script_output": exec_result.get("output", ""),
+        "script_success": exec_result.get("success", False),
         "history": history,
     })
     with open(os.path.join(path, "metadata.json"), "w", encoding="utf-8") as f:
@@ -190,39 +241,18 @@ def _update_conversation(path: str, folder: str, files: dict[str, str], task: st
 
     commit_msg = _make_commit_msg(agent, reasoning, task)
     _git_commit(commit_msg, folder)
-    return path
 
-
-def _write_files(path: str, files: dict[str, str]) -> list[str]:
-    """Write files dict to path, return list of written filenames."""
-    written = []
-    for fname, content in files.items():
-        if not fname or ".." in fname or "/" in fname or "\\" in fname:
-            continue
-        safe_name = os.path.basename(fname) or "output.txt"
-        fpath = os.path.join(path, safe_name)
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content or "")
-        written.append(safe_name)
-    return written
-
-
-def _write_readme_if_missing(path: str, files: dict, name: str, task: str):
-    """Auto-generate README.md if not in files."""
-    if "README.md" in files:
-        return
-    if "main.py" in files:
-        readme = f"# {name}\n\n{task}\n\n## Run\n\n```bash\npip install -r requirements.txt\npython main.py\n```\n"
-    elif "index.html" in files:
-        readme = f"# {name}\n\n{task}\n\n## Run\n\nOpen `index.html` in a browser.\n"
-    else:
-        readme = f"# {name}\n\n{task}\n"
-    with open(os.path.join(path, "README.md"), "w", encoding="utf-8") as f:
-        f.write(readme)
+    return {
+        "path": path,
+        "folder": folder,
+        "files": file_list,
+        "script_output": exec_result.get("output", ""),
+        "script_success": exec_result.get("success", False),
+        "script_exit_code": exec_result.get("exit_code", -1),
+    }
 
 
 def get_git_log(folder: str) -> list[dict]:
-    """Get git commit history filtered to a specific conversation folder."""
     if not os.path.isdir(os.path.join(CONV_DIR, ".git")):
         return []
     raw = _run_git("log", "--pretty=format:%H||%ai||%s", "--reverse", "--", f"{folder}/")
@@ -237,7 +267,6 @@ def get_git_log(folder: str) -> list[dict]:
 
 
 def get_git_diff(folder: str, commit: str = "HEAD~1..HEAD") -> dict[str, list[str]]:
-    """Get git diff for a conversation folder. Returns {filename: [diff_lines]}."""
     if not os.path.isdir(os.path.join(CONV_DIR, ".git")):
         return {}
     raw = _run_git("diff", commit, "--", f"{folder}/", f":(exclude){folder}/metadata.json")
@@ -262,7 +291,6 @@ def get_git_diff(folder: str, commit: str = "HEAD~1..HEAD") -> dict[str, list[st
 
 
 def rename_conversation(folder: str, new_name: str) -> str | None:
-    """Rename conversation folder. Returns new folder name or None on error."""
     if ".." in folder or "/" in folder or "\\" in folder or ".." in new_name:
         return None
     safe_new = sanitize_folder_name(new_name)
@@ -288,7 +316,6 @@ def rename_conversation(folder: str, new_name: str) -> str | None:
 
 
 def delete_conversation(folder: str) -> bool:
-    """Delete conversation folder and all contents."""
     if ".." in folder or "/" in folder or "\\" in folder:
         return False
     path = os.path.join(CONV_DIR, folder)
