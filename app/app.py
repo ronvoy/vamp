@@ -8,7 +8,7 @@ from flask_cors import CORS
 
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
-from code_generator import generate_openai, generate_anthropic, generate_with_model, fetch_models
+from code_generator import generate_openai, generate_anthropic, generate_with_model, fetch_models, AGENT_MODELS, DEFAULT_MODEL
 from conversation_store import save_conversation, list_conversations, get_conversation, get_git_diff, rename_conversation, delete_conversation
 
 app = Flask(__name__)
@@ -71,7 +71,10 @@ def api_transcribe():
     if "audio" not in request.files:
         return jsonify({"error": "No audio file"}), 400
     audio_bytes = request.files["audio"].read()
-    text = transcribe_bytes(audio_bytes)
+    try:
+        text = transcribe_bytes(audio_bytes)
+    except Exception as e:
+        return jsonify({"error": f"Transcription failed: {e}"}), 500
     agent = select_agent(text)
     task = extract_task(text) or text
     return jsonify({"text": text, "agent": agent, "task": task})
@@ -140,14 +143,15 @@ def api_generate():
         try:
             result = generate_with_model(task, selected_model, context=context)
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": f"[model={selected_model}] {e}"}), 500
         agent = selected_model
     else:
         gen = GENERATORS.get(agent, generate_openai)
+        model_name = AGENT_MODELS.get(agent, DEFAULT_MODEL)
         try:
             result = gen(task, context=context)
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": f"[model={model_name}] {e}"}), 500
 
     save_result = save_conversation(
         result["script"], result["folder_name"],
