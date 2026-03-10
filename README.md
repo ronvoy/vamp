@@ -16,19 +16,19 @@ Voice Input → Transcription → Agent Selection → Code Generation → Output
 
 ```mermaid
 flowchart TB
-    subgraph Capture["🎤 Voice Capture"]
+    subgraph Capture["Voice Capture"]
         A[User speaks] --> B[Audio Stream]
         B --> C[WebSocket/HTTP Stream]
     end
 
-    subgraph Transcribe["📝 Transcription & Translation"]
+    subgraph Transcribe["Transcription & Translation"]
         C --> D[LLM/Whisper Transcribe]
         D --> E[Normalized Text]
         E --> F[Language Detection]
         F --> G[Translated to Target Lang]
     end
 
-    subgraph Parse["🔍 Intent & Agent Selection"]
+    subgraph Parse["Intent & Agent Selection"]
         G --> H[Parse Voice Command]
         H --> I{Agent Keyword Detected?}
         I -->|"e.g. 'use GPT' / 'Claude build'"| J[Select LLM Agent]
@@ -37,22 +37,22 @@ flowchart TB
         K --> L
     end
 
-    subgraph Generate["⚙️ Code Generation"]
+    subgraph Generate["Code Generation"]
         L --> M[Build Prompt with Task]
         M --> N[LLM API Call]
         N --> O[Code Response]
         O --> P[Parse & Validate Code Blocks]
     end
 
-    subgraph Persist["💾 Persistence & Delivery"]
-        P --> Q[AI-Generated Folder Name]
+    subgraph Persist["Persistence & Delivery"]
+        P --> Q[Auto Folder Name]
         Q --> R[Create conversation/YYYY-MM-DD_HHmm_<name>/]
         R --> S[Save code files]
         S --> T[README + metadata.json]
         T --> U[Ready for Test & Deploy]
     end
 
-    subgraph Response["🔊 Response"]
+    subgraph Response["Response"]
         U --> V[Optional TTS Feedback]
         V --> W[User hears confirmation]
     end
@@ -94,7 +94,7 @@ sequenceDiagram
 | **Command Parser** | Regex or small LLM | Extracts task + agent selector from transcribed text |
 | **Agent Registry** | Map of agent names → OpenRouter model IDs | Routes to correct LLM (GPT-4, Claude, etc.) via OpenRouter |
 | **Code Generator** | OpenRouter + selected LLM | Receives task, produces code + folder name via single API |
-| **Conversation Store** | Local `conversation/` directory | Saves each session with timestamp + AI-generated name |
+| **Conversation Store** | Local `conversation/` directory | Saves each session with timestamp + auto-generated name |
 | **Output Packager** | File writer | Writes `main.py`, `requirements.txt`, `README`, `metadata.json` |
 | **TTS (Optional)** | Text-to-speech | Reads back status or errors to user |
 
@@ -226,7 +226,3 @@ VAMP/
 | `/api/stream` | WebSocket | Full pipeline: voice → transcribe → generate → save |
 
 ---
-
-## License
-
-MIT
