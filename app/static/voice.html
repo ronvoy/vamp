@@ -70,6 +70,25 @@
     #btn-continue.visible { display: inline-flex; }
     #btn-continue:hover { background: var(--output-bg); color: var(--text); }
 
+    #btn-tune { padding: 0.6rem 0.9rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.82rem; color: var(--text-muted); white-space: nowrap; }
+    #btn-tune:hover { background: var(--output-bg); color: var(--text); }
+    #btn-tune.active { border-color: var(--path-color); color: var(--path-color); }
+    #tuning-panel {
+      display: none; margin-top: 0.75rem; padding: 1rem; background: var(--output-bg);
+      border-radius: 8px; border: 1px solid var(--border);
+    }
+    #tuning-panel.visible { display: block; }
+    .tune-presets { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; }
+    .tune-presets button { padding: 0.35rem 0.7rem; font-size: 0.78rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+    .tune-presets button:hover { border-color: var(--path-color); }
+    .tune-presets button.active { background: var(--path-color); color: #fff; border-color: var(--path-color); }
+    .tune-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.25rem; }
+    @media (max-width: 600px) { .tune-grid { grid-template-columns: 1fr; } }
+    .tune-row { display: flex; align-items: center; gap: 0.5rem; }
+    .tune-row label { font-size: 0.78rem; min-width: 110px; color: var(--text-muted); }
+    .tune-row input[type=range] { flex: 1; accent-color: var(--path-color); }
+    .tune-row .tune-val { font-size: 0.78rem; min-width: 40px; text-align: right; font-family: monospace; color: var(--text); }
+
     #model-selector { position: relative; flex: 1; min-width: 180px; max-width: 360px; }
     #model-search {
       width: 100%; padding: 0.55rem 0.75rem; font-size: 0.85rem;
@@ -251,6 +270,22 @@
         <button id="model-clear" title="Clear model selection">✕</button>
         <div id="model-dropdown"></div>
       </div>
+      <button id="btn-tune" title="Tune LLM parameters">Tune</button>
+    </div>
+    <div id="tuning-panel">
+      <div class="tune-presets">
+        <button data-preset="creative">Creative</button>
+        <button data-preset="balanced" class="active">Balanced</button>
+        <button data-preset="deterministic">Deterministic</button>
+      </div>
+      <div class="tune-grid">
+        <div class="tune-row"><label>Temperature</label><input type="range" id="t-temperature" min="0" max="2" step="0.05" value="1"><span class="tune-val">1.00</span></div>
+        <div class="tune-row"><label>Top P</label><input type="range" id="t-top_p" min="0" max="1" step="0.05" value="1"><span class="tune-val">1.00</span></div>
+        <div class="tune-row"><label>Top K</label><input type="range" id="t-top_k" min="0" max="500" step="1" value="0"><span class="tune-val">0</span></div>
+        <div class="tune-row"><label>Freq. Penalty</label><input type="range" id="t-frequency_penalty" min="-2" max="2" step="0.05" value="0"><span class="tune-val">0.00</span></div>
+        <div class="tune-row"><label>Pres. Penalty</label><input type="range" id="t-presence_penalty" min="-2" max="2" step="0.05" value="0"><span class="tune-val">0.00</span></div>
+        <div class="tune-row"><label>Max Tokens</label><input type="range" id="t-max_tokens" min="256" max="32768" step="256" value="8192"><span class="tune-val">8192</span></div>
+      </div>
     </div>
     <div id="preview-box">
       <label style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;display:block">Type or edit your prompt:</label>
@@ -292,6 +327,51 @@
     const modelSearch = document.getElementById('model-search');
     const modelDropdown = document.getElementById('model-dropdown');
     const modelClear = document.getElementById('model-clear');
+    const btnTune = document.getElementById('btn-tune');
+    const tuningPanel = document.getElementById('tuning-panel');
+
+    /* ---------- Tuning panel logic ---------- */
+    const PRESETS = {
+      creative:       { temperature: 1.5, top_p: 0.95, top_k: 80, frequency_penalty: 0.3, presence_penalty: 0.3, max_tokens: 8192 },
+      balanced:       { temperature: 1.0, top_p: 1.0,  top_k: 0,  frequency_penalty: 0,   presence_penalty: 0,   max_tokens: 8192 },
+      deterministic:  { temperature: 0.2, top_p: 0.5,  top_k: 10, frequency_penalty: 0,   presence_penalty: 0,   max_tokens: 8192 },
+    };
+
+    function applyPreset(name) {
+      const p = PRESETS[name]; if (!p) return;
+      tuningPanel.querySelectorAll('.tune-presets button').forEach(b => b.classList.toggle('active', b.dataset.preset === name));
+      Object.entries(p).forEach(([k, v]) => {
+        const slider = document.getElementById('t-' + k); if (!slider) return;
+        slider.value = v;
+        slider.nextElementSibling.textContent = Number.isInteger(v) ? v : v.toFixed(2);
+      });
+    }
+
+    tuningPanel.querySelectorAll('.tune-presets button').forEach(b =>
+      b.addEventListener('click', () => applyPreset(b.dataset.preset))
+    );
+    tuningPanel.querySelectorAll('input[type=range]').forEach(slider => {
+      slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        slider.nextElementSibling.textContent = (slider.step && parseFloat(slider.step) < 1) ? v.toFixed(2) : String(Math.round(v));
+        tuningPanel.querySelectorAll('.tune-presets button').forEach(b => b.classList.remove('active'));
+      });
+    });
+
+    btnTune.addEventListener('click', () => {
+      tuningPanel.classList.toggle('visible');
+      btnTune.classList.toggle('active', tuningPanel.classList.contains('visible'));
+    });
+
+    function getLlmParams() {
+      const params = {};
+      tuningPanel.querySelectorAll('input[type=range]').forEach(s => {
+        const key = s.id.replace('t-', '');
+        params[key] = parseFloat(s.value);
+      });
+      return params;
+    }
+    /* ---------- end tuning ---------- */
 
     if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
     themeBtn.addEventListener('click', () => {
@@ -509,6 +589,7 @@
       if (out) out.innerHTML = '<span class="path">Generating...</span>';
       const body = { task: editedTask, continue_from: continueContext || null };
       if (selectedModel) body.model = selectedModel;
+      body.llm_params = getLlmParams();
       try {
         const r = await fetch(API + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await r.json();

@@ -138,10 +138,11 @@ def api_generate():
                     parts.append(f"\n--- {name} ---\n{content}")
             context = "\n".join(parts)
 
+    llm_params = data.get("llm_params")
     selected_model = data.get("model")
     if selected_model:
         try:
-            result = generate_with_model(task, selected_model, context=context)
+            result = generate_with_model(task, selected_model, context=context, params=llm_params)
         except Exception as e:
             return jsonify({"error": f"[model={selected_model}] {e}"}), 500
         agent = selected_model
@@ -149,7 +150,7 @@ def api_generate():
         gen = GENERATORS.get(agent, generate_openai)
         model_name = AGENT_MODELS.get(agent, DEFAULT_MODEL)
         try:
-            result = gen(task, context=context)
+            result = gen(task, context=context, params=llm_params)
         except Exception as e:
             return jsonify({"error": f"[model={model_name}] {e}"}), 500
 

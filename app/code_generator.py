@@ -118,32 +118,65 @@ def _client():
     )
 
 
-def generate_openai(task: str, context: str | None = None, model_id: str | None = None) -> dict:
-    return _generate(task, "openai", context, model_id)
+LLM_PARAM_BOUNDS = {
+    "temperature":      {"min": 0, "max": 2,     "default": 1.0},
+    "top_p":            {"min": 0, "max": 1,     "default": 1.0},
+    "top_k":            {"min": 0, "max": 500,   "default": 0},
+    "frequency_penalty": {"min": -2, "max": 2,   "default": 0},
+    "presence_penalty":  {"min": -2, "max": 2,   "default": 0},
+    "max_tokens":       {"min": 256, "max": 32768, "default": 8192},
+}
 
 
-def generate_anthropic(task: str, context: str | None = None, model_id: str | None = None) -> dict:
-    return _generate(task, "anthropic", context, model_id)
+def _sanitize_params(raw: dict | None) -> dict:
+    """Clamp incoming params to safe bounds and return a clean dict."""
+    if not raw:
+        return {}
+    out = {}
+    for key, bounds in LLM_PARAM_BOUNDS.items():
+        if key in raw:
+            try:
+                v = float(raw[key])
+            except (TypeError, ValueError):
+                continue
+            v = max(bounds["min"], min(bounds["max"], v))
+            if v != bounds["default"]:
+                out[key] = int(v) if key in ("top_k", "max_tokens") else round(v, 2)
+    return out
 
 
-def generate_with_model(task: str, model_id: str, context: str | None = None) -> dict:
-    return _generate(task, "custom", context, model_id)
+def generate_openai(task: str, context: str | None = None, model_id: str | None = None, params: dict | None = None) -> dict:
+    return _generate(task, "openai", context, model_id, params)
 
 
-def _generate(task: str, agent: str, context: str | None = None, model_id: str | None = None) -> dict:
+def generate_anthropic(task: str, context: str | None = None, model_id: str | None = None, params: dict | None = None) -> dict:
+    return _generate(task, "anthropic", context, model_id, params)
+
+
+def generate_with_model(task: str, model_id: str, context: str | None = None, params: dict | None = None) -> dict:
+    return _generate(task, "custom", context, model_id, params)
+
+
+def _generate(task: str, agent: str, context: str | None = None, model_id: str | None = None, params: dict | None = None) -> dict:
     model = model_id or AGENT_MODELS.get(agent, DEFAULT_MODEL)
     client = _client()
     user_content = f"Task: {task}"
     if context:
         user_content = f"Continue from previous work. Context:\n{context}\n\nNew request: {task}"
-    r = client.chat.completions.create(
-        model=model,
-        messages=[
+    safe = _sanitize_params(params)
+    kwargs = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
-        max_tokens=8192,
-    )
+        "max_tokens": safe.pop("max_tokens", 8192),
+    }
+    top_k = safe.pop("top_k", None)
+    kwargs.update(safe)
+    if top_k:
+        kwargs["extra_body"] = {"top_k": top_k}
+    r = client.chat.completions.create(**kwargs)
     content = r.choices[0].message.content
     usage = {}
     if getattr(r, "usage", None):
