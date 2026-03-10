@@ -1,4 +1,4 @@
-# VAMP — Voice AI Multimodal Prompter
+# VAMP — Voice Application Multi-LLM Platform
 
 Build applications through natural voice conversation. Speak your intent, select an AI coding agent by voice, and receive deployable code output—all in real time.
 

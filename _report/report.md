@@ -1,9 +1,11 @@
-# VAMP — Voice AI Multimodal Prompter
+# AI System Engineering
 
-## Technical Report
+## Technical Report: VAMP — Voice Application Multi-LLM Platform
 
 **Course:** AI System Engineering  
-**Date:** March 10, 2026  
+**Project Supervisor:** Prof. Roberto Pietrantuono
+**Report by:** Hussain Ullah Baig (D03000205), Rohan Baidya (D03000192)
+**Github Link:** https://github.com/ronvoy/vamp
 **Project:** VAMP — A Voice-Driven AI Code Generation System  
 
 ---
@@ -62,7 +64,7 @@ This shows the message flow between components, including the external API calls
 
 | Phase | Name | What happens |
 |-------|------|-------------|
-| 1 | **Recording & Transcription** | Browser captures audio (WebM), sends it to the server. Server converts to WAV via pydub, Base64-encodes it, sends it to a multimodal LLM. The transcript appears in an editable text area. |
+| 1 | **Recording & Transcription** | Browser captures audio (WebM), sends it to the server. Server converts to WAV via pydub, Base64-encodes it, sends it to an LLM with audio input support. The transcript appears in an editable text area. |
 | 2 | **Agent Selection** | The agent registry scans the transcript for keywords like "gpt" or "claude" to pick an LLM. Keywords are stripped from the text so the model gets a clean task. If nothing matches, the default agent is used. Users can also pick a model manually from the dropdown. |
 | 3 | **Code Generation** | The task goes into a system prompt that tells the LLM to produce a bash `setup.sh` script with heredoc file creation. The response is parsed with regex to pull out the script, a folder name, and the model's reasoning. Token usage is tracked. |
 | 4 | **Persistence & Execution** | A timestamped folder is created, the script is run with a 60-second timeout, all files are cataloged in a JSON metadata file, and everything gets committed to git. Continuations update the existing folder and append a new commit. |
@@ -75,7 +77,7 @@ This shows the message flow between components, including the external API calls
 
 Takes raw audio bytes from the browser (WebM/OGG), converts to WAV using pydub (which uses ffmpeg under the hood), Base64-encodes the result, and sends it as an `input_audio` block in a chat completion request. The prompt just says "transcribe this audio exactly." If WAV conversion fails (e.g., ffmpeg not installed), it falls back to sending the raw bytes.
 
-Using a multimodal LLM for transcription instead of a separate speech-to-text service means everything goes through one API endpoint (OpenRouter). The default model is Gemini 2.5 Flash — fast, cheap, and handles audio well.
+Using an LLM with audio support for transcription instead of a separate speech-to-text service means everything goes through one API endpoint (OpenRouter). The default model is Gemini 2.5 Flash — fast, cheap, and handles audio well.
 
 | Attribute | Detail |
 |-----------|--------|
@@ -113,9 +115,34 @@ Sends a system prompt + user task to the selected LLM. The system prompt tells t
 |-----------|--------|
 | API | OpenRouter (openrouter.ai/api/v1) |
 | Default Model | Gemma 3 27B Instruct |
-| Max Tokens | 8,192 |
+| Max Tokens | 8,192 (tunable up to 32,768) |
 | Cache TTL | 3,600 seconds |
 | Platforms | iOS/Swift, Android/Kotlin, Web, Python, Go, Rust, TypeScript/React, Java |
+
+#### LLM Tuning Parameters
+
+Users can adjust generation behavior directly from the UI. A "Tune" button next to the model selector opens a panel with six sliders. Each parameter is validated and clamped server-side before being passed to the OpenRouter API.
+
+![LLM Tuning Parameter Workflow](diagrams/tuning.png)
+
+| Parameter | Range | Default | Description |
+|-----------|-------|---------|-------------|
+| Temperature | 0 – 2 | 1.0 | Controls randomness. Higher values produce more varied output; lower values are more focused and repetitive. |
+| Top P | 0 – 1 | 1.0 | Nucleus sampling threshold. The model considers tokens whose cumulative probability reaches this value. Lower values narrow the token pool. |
+| Top K | 0 – 500 | 0 (disabled) | Limits the model to the K most likely tokens at each step. 0 means no limit. Lower values reduce randomness. |
+| Frequency Penalty | -2 – 2 | 0 | Penalizes tokens proportionally to how often they have already appeared. Positive values discourage repetition. |
+| Presence Penalty | -2 – 2 | 0 | Penalizes tokens that have appeared at all, regardless of frequency. Positive values encourage topic diversity. |
+| Max Tokens | 256 – 32,768 | 8,192 | Maximum number of tokens the model can generate in its response. |
+
+#### Tuning Presets
+
+Three presets apply predefined slider values for common use cases:
+
+| Preset | Temperature | Top P | Top K | Freq. Penalty | Pres. Penalty | Max Tokens | Use Case |
+|--------|-------------|-------|-------|---------------|---------------|------------|----------|
+| **Creative** | 1.50 | 0.95 | 80 | 0.30 | 0.30 | 8,192 | Brainstorming, exploratory generation, diverse output |
+| **Balanced** | 1.00 | 1.00 | 0 | 0.00 | 0.00 | 8,192 | General-purpose tasks (default) |
+| **Deterministic** | 0.20 | 0.50 | 10 | 0.00 | 0.00 | 8,192 | Predictable, consistent output for structured tasks |
 
 ### 4.4 Conversation Store
 
@@ -135,6 +162,7 @@ A single `voice.html` file (~1,500 lines, vanilla JS/CSS/HTML) served by Flask. 
 - **Recording:** Hold-to-record using MediaRecorder API. Visual feedback via CSS animations.
 - **Transcript editing:** The transcription result is shown in an editable textarea so users can fix errors before generating.
 - **Model dropdown:** Searchable, keyboard-navigable. Shows model name, context size, and per-token pricing.
+- **LLM tuning panel:** A collapsible panel with six sliders (temperature, top_p, top_k, frequency penalty, presence penalty, max tokens) and three presets (Creative, Balanced, Deterministic). Values are sent with every generation request.
 - **History sidebar:** Lists all projects newest-first with search, rename, and delete. Clicking a project shows its files, git log, and diffs.
 - **Result view:** Shows generated files, execution output, reasoning, and raw response. Git diffs between iterations. Dark/light theme toggle saved to localStorage. GSAP handles animations.
 
@@ -146,7 +174,7 @@ Nine endpoints:
 |----------|--------|---------|
 | `/` | GET | Redirects to the web UI |
 | `/api/transcribe` | POST | Audio in, transcript + agent + task out |
-| `/api/generate` | POST | Task + model in, generated project out |
+| `/api/generate` | POST | Task + model + tuning params in, generated project out |
 | `/api/voice` | POST | Audio in, generated project out (combined pipeline) |
 | `/api/models` | GET | Full model catalog with pricing (cached) |
 | `/api/history` | GET | List of all projects |
@@ -180,7 +208,7 @@ All return JSON. Folder parameters are checked for path traversal. Audio uploads
 | **Frontend** | HTML5, CSS3, Vanilla JS | SPA, no build tools |
 | **Animation** | GSAP (CDN) | UI transitions |
 | **LLM Gateway** | OpenRouter API | Access to 80+ models via one key |
-| **Transcription** | Gemini 2.5 Flash | Multimodal audio-to-text |
+| **Transcription** | Gemini 2.5 Flash | Audio-to-text via LLM |
 | **Code Gen** | GPT-4o-mini, Claude 3.5 Haiku, Gemma 3 27B | Selectable LLMs |
 | **Audio** | pydub + ffmpeg | WebM → WAV conversion |
 | **Version Control** | Git (subprocess) | Auto-commits per project |
@@ -194,7 +222,7 @@ All return JSON. Folder parameters are checked for path traversal. Audio uploads
 vamp/
 ├── app/
 │   ├── app.py                  # Flask server with REST API endpoints
-│   ├── transcriber.py          # Voice-to-text via multimodal LLM
+│   ├── transcriber.py          # Voice-to-text via LLM audio transcription
 │   ├── agent_registry.py       # Keyword-based agent routing
 │   ├── code_generator.py       # Structured LLM prompting and response parsing
 │   ├── conversation_store.py   # Project lifecycle management with git integration

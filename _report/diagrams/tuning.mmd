@@ -1,0 +1,66 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3a7edf', 'lineColor': '#888', 'secondaryColor': '#2d2d2d', 'tertiaryColor': '#1a1a2e', 'background': '#0d1117', 'mainBkg': '#161b22', 'nodeBorder': '#3a7edf', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#c9d1d9', 'edgeLabelBackground': '#161b22'}}}%%
+
+flowchart TD
+    subgraph UI["Frontend — voice.html"]
+        TUNE([User Clicks Tune Button])
+        PANEL[Tuning Panel Opens]
+
+        subgraph PRESETS["Presets"]
+            P1["Creative<br/><i>temp=1.5, top_p=0.95, top_k=80<br/>freq=0.3, pres=0.3</i>"]
+            P2["Balanced<br/><i>temp=1.0, top_p=1.0, top_k=0<br/>freq=0, pres=0</i>"]
+            P3["Deterministic<br/><i>temp=0.2, top_p=0.5, top_k=10<br/>freq=0, pres=0</i>"]
+        end
+
+        subgraph SLIDERS["Manual Sliders"]
+            S1["Temperature — 0 to 2"]
+            S2["Top P — 0 to 1"]
+            S3["Top K — 0 to 500"]
+            S4["Frequency Penalty — -2 to 2"]
+            S5["Presence Penalty — -2 to 2"]
+            S6["Max Tokens — 256 to 32768"]
+        end
+
+        COLLECT["getLlmParams()<br/><i>Read all slider values</i>"]
+    end
+
+    subgraph SEND["API Request — POST /api/generate"]
+        BODY["Request Body<br/><i>task, model, llm_params</i>"]
+    end
+
+    subgraph BACKEND["Backend — app.py"]
+        EXTRACT["Extract llm_params<br/>from request JSON"]
+    end
+
+    subgraph SANITIZE["Server-Side Validation — code_generator.py"]
+        CLAMP["_sanitize_params()<br/><i>Clamp each value to<br/>min/max bounds</i>"]
+        STRIP["Strip defaults<br/><i>Only send non-default<br/>values to API</i>"]
+    end
+
+    subgraph LLM_CALL["OpenRouter API Call"]
+        BUILD["Build API kwargs"]
+        TEMP_EFFECT["temperature<br/><i>Scales logit distribution.<br/>High = flatter = more random.</i>"]
+        TOPP_EFFECT["top_p<br/><i>Nucleus sampling cutoff.<br/>Keeps tokens summing to p.</i>"]
+        TOPK_EFFECT["top_k<br/><i>Hard cutoff to K most<br/>probable tokens.</i>"]
+        FREQ_EFFECT["frequency_penalty<br/><i>Subtracts penalty * count<br/>from token logits.</i>"]
+        PRES_EFFECT["presence_penalty<br/><i>One-time penalty for any<br/>previously used token.</i>"]
+        MAX_EFFECT["max_tokens<br/><i>Stops generation after<br/>N tokens produced.</i>"]
+        API["chat.completions.create()<br/><i>Parameters applied to<br/>token sampling loop</i>"]
+    end
+
+    subgraph OUTPUT["Generation Output"]
+        RESPONSE["LLM Response<br/><i>Script + reasoning</i>"]
+    end
+
+    TUNE --> PANEL
+    PANEL --> PRESETS
+    PANEL --> SLIDERS
+    P1 & P2 & P3 -->|apply values| SLIDERS
+    SLIDERS --> COLLECT
+    COLLECT -->|llm_params object| BODY
+    BODY --> EXTRACT
+    EXTRACT -->|raw params dict| CLAMP
+    CLAMP --> STRIP
+    STRIP -->|safe params| BUILD
+    BUILD --> TEMP_EFFECT & TOPP_EFFECT & TOPK_EFFECT & FREQ_EFFECT & PRES_EFFECT & MAX_EFFECT
+    TEMP_EFFECT & TOPP_EFFECT & TOPK_EFFECT & FREQ_EFFECT & PRES_EFFECT & MAX_EFFECT --> API
+    API --> RESPONSE
