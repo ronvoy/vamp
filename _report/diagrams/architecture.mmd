@@ -1,0 +1,46 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3a7edf', 'lineColor': '#888', 'secondaryColor': '#2d2d2d', 'tertiaryColor': '#1a1a2e', 'background': '#0d1117', 'mainBkg': '#161b22', 'nodeBorder': '#3a7edf', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d'}}}%%
+
+flowchart LR
+    subgraph UI["User Interface Layer"]
+        browser["Browser Web UI"]
+        recorder["MediaRecorder API"]
+    end
+
+    subgraph BACKEND["Flask Backend Layer"]
+        flask["Flask Server app.py"]
+        transcriber["Transcriber transcriber.py"]
+        registry["Agent Registry agent_registry.py"]
+        codegen["Code Generator code_generator.py"]
+        store["Conversation Store conversation_store.py"]
+    end
+
+    subgraph EXTERNAL["External Services"]
+        openrouter["OpenRouter API openrouter.ai"]
+        gemini["Gemini Flash Transcription"]
+        gpt["GPT-4o-mini"]
+        claude["Claude 3.5 Haiku"]
+    end
+
+    subgraph STORAGE["Persistence Layer"]
+        convdir["conversation Project Folders"]
+        gitrepo["Git Repository Version History"]
+    end
+
+    browser --> flask
+    recorder --> flask
+    flask --> transcriber
+    flask --> registry
+    flask --> codegen
+    flask --> store
+    transcriber --> openrouter
+    codegen --> openrouter
+    openrouter --> gemini
+    openrouter --> gpt
+    openrouter --> claude
+    store --> convdir
+    store --> gitrepo
+
+    style UI fill:#1a1a2e,stroke:#4a9eff,stroke-width:2px
+    style BACKEND fill:#1a2e1a,stroke:#4aff4a,stroke-width:2px
+    style EXTERNAL fill:#2e2e1a,stroke:#ffaa4a,stroke-width:2px
+    style STORAGE fill:#2e1a2e,stroke:#aa4aff,stroke-width:2px

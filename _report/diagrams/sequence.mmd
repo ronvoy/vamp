@@ -1,0 +1,68 @@
+%%{init: {'theme': 'dark'}}%%
+
+sequenceDiagram
+    actor User
+    participant UI as voice.html<br/>(Browser)
+    participant Flask as app.py<br/>(Flask Server)
+    participant Trans as transcriber.py
+    participant Agent as agent_registry.py
+    participant Gen as code_generator.py
+    participant Store as conversation_store.py
+    participant OR as OpenRouter API
+    participant FS as File System<br/>+ Git
+
+    Note over User,FS: Phase 1 — Voice Recording & Transcription
+
+    User->>UI: Hold record button & speak
+    UI->>UI: MediaRecorder captures WebM audio
+    User->>UI: Release button
+    UI->>+Flask: POST /api/transcribe (audio blob)
+    Flask->>+Trans: transcribe_bytes(audio_bytes)
+    Trans->>Trans: Convert WebM → WAV (pydub)
+    Trans->>Trans: Base64 encode WAV
+    Trans->>+OR: chat.completions.create<br/>(gemini-2.5-flash + audio)
+    OR-->>-Trans: Transcribed text
+    Trans-->>-Flask: Plain text transcript
+    Flask->>+Agent: select_agent(text)
+    Agent->>Agent: Parse keywords (gpt/claude/etc.)
+    Agent-->>-Flask: agent_id
+    Flask->>+Agent: extract_task(text)
+    Agent-->>-Flask: Clean task text
+    Flask-->>-UI: {text, agent, task}
+    UI->>User: Show transcript in editable preview
+
+    Note over User,FS: Phase 2 — Code Generation
+
+    User->>UI: Edit text (optional) + pick model + Send
+    UI->>+Flask: POST /api/generate {task, model?, continue_from?}
+    Flask->>+Gen: generate_with_model(task, model) or generate_openai/anthropic(task)
+    Gen->>Gen: Build system prompt (setup.sh template)
+    Gen->>+OR: chat.completions.create<br/>(selected model + system prompt)
+    OR-->>-Gen: LLM response (bash script + folder name)
+    Gen->>Gen: _parse_response() — extract script, reasoning
+    Gen-->>-Flask: {script, folder_name, reasoning, usage}
+
+    Note over User,FS: Phase 3 — Save, Execute & Version
+
+    Flask->>+Store: save_conversation(script, folder_name, task, agent, ...)
+    Store->>FS: mkdir conversation/YYYY-MM-DD_HHmm_name/
+    Store->>FS: Write setup.sh
+    Store->>FS: Execute bash setup.sh (60s timeout)
+    FS-->>Store: Generated project files
+    Store->>FS: Write metadata.json
+    Store->>FS: git add -A && git commit
+    Store-->>-Flask: {path, folder, files, script_output, script_success}
+
+    Flask-->>-UI: Full JSON response
+    UI->>User: Render files, diffs, output, reasoning
+
+    Note over User,FS: Phase 4 — History & Continuation (optional)
+
+    User->>UI: Browse history / Click "Continue"
+    UI->>+Flask: GET /api/history
+    Flask-->>-UI: List of all conversations
+    UI->>+Flask: GET /api/conversation/:folder
+    Flask->>+Store: get_conversation(folder)
+    Store->>FS: Read files + git log + git diff
+    Store-->>-Flask: Full conversation data
+    Flask-->>-UI: {metadata, files, git_log, git_diff}
