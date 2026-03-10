@@ -100,6 +100,42 @@ sequenceDiagram
 
 ---
 
+## Docker
+
+### Pull & Run
+
+```bash
+docker run -d \
+  -p 5000:5000 \
+  -e OPENROUTER_API_KEY=your_key \
+  -v ./conversation:/vamp/conversation \
+  ronvoy/vamp:latest
+```
+
+### Build Locally
+
+```bash
+docker build -t vamp .
+docker run -d \
+  -p 5000:5000 \
+  -e OPENROUTER_API_KEY=your_key \
+  -v ./conversation:/vamp/conversation \
+  vamp
+```
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | Yes | — | API key for OpenRouter |
+| `TRANSCRIBE_MODEL` | No | `google/gemini-2.5-flash` | Model for voice transcription |
+| `DEFAULT_AGENT` | No | `openai` | Default LLM agent |
+| `PORT` | No | `5000` | Server port |
+
+> Mount `-v ./conversation:/vamp/conversation` to persist generated projects across container restarts.
+
+---
+
 ## Implementation Steps & Caveats
 
 | Step | Implementation | Caveats |

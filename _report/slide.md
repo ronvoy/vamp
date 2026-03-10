@@ -102,7 +102,27 @@
 
 ---
 
-### Slide 14: Conclusion and Future Work
+### Slide 14: Docker Containerization
+
+**Title:** Docker Containerization and Deployment  
+**Description:** VAMP is fully containerized and published to Docker Hub at `ronvoy/vamp:latest` (~256 MB). The Docker image is built on `python:3.10-slim` and packages all runtime dependencies — ffmpeg for audio conversion, git for version control, and all Python packages — into a single portable artifact. The Dockerfile is optimized for layer caching: requirements are installed before application code is copied, so dependency layers are reused across builds unless `requirements.txt` changes. Sensitive configuration (API keys) is never baked into the image; instead, all settings are passed at runtime via environment variables following the twelve-factor app methodology. The `conversation/` directory is designed to be mounted as an external volume, ensuring generated projects persist across container restarts and upgrades. Deployment requires only two commands:
+
+```bash
+docker pull ronvoy/vamp:latest
+```
+
+```bash
+docker run -d -p 5000:5000 \
+  -e OPENROUTER_API_KEY=your_key \
+  -v ./conversation:/vamp/conversation \
+  ronvoy/vamp:latest
+```
+
+The `.dockerignore` file excludes `.git/`, `.env`, `conversation/`, `_report/`, `__pycache__/`, and virtual environments from the build context to minimize image size and prevent sensitive data leakage.
+
+---
+
+### Slide 15: Conclusion and Future Work
 
 **Title:** Conclusion and Future Directions  
-**Description:** VAMP demonstrates that a complete voice-to-code pipeline is feasible using current multimodal LLM capabilities, structured prompting techniques, and lightweight web technologies. The system cleanly separates transcription, routing, generation, and persistence into independent, replaceable modules. Git-based versioning provides iteration tracking without custom infrastructure. The prototype validates voice as a viable input modality for AI-assisted software engineering. **Future work** includes streaming LLM responses for real-time generation feedback, multi-turn conversational project refinement, automated testing of generated code, container-based execution sandboxing for stronger isolation, and collaborative multi-user sharing through a shared git remote.
+**Description:** VAMP demonstrates that a complete voice-to-code pipeline is feasible using current multimodal LLM capabilities, structured prompting techniques, and lightweight web technologies. The system cleanly separates transcription, routing, generation, and persistence into independent, replaceable modules. Git-based versioning provides iteration tracking without custom infrastructure. Docker containerization enables portable, reproducible deployment with a single command. The prototype validates voice as a viable input modality for AI-assisted software engineering. **Future work** includes streaming LLM responses for real-time generation feedback, multi-turn conversational project refinement, automated testing of generated code, container-based execution sandboxing for stronger isolation, and collaborative multi-user sharing through a shared git remote.

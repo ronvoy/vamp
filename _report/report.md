@@ -222,9 +222,8 @@ vamp/
 │   └── static/
 │       └── voice.html          # Complete single-page web interface
 ├── conversation/               # Generated projects directory (git-tracked)
-├── _rsc/
-│   ├── setup_voice_app_server.sh   # One-time project bootstrap script
-│   └── diagrams/                   # Source diagram files
+├── Dockerfile                  # Container image definition
+├── .dockerignore               # Build context exclusion rules
 ├── _report/
 │   ├── report.md               # This technical report
 │   ├── slide.md                # Presentation slide notes
@@ -261,7 +260,125 @@ vamp/
 
 ---
 
-## 10. Conclusion
+## 10. Docker Containerization
+
+### 10.1 Overview
+
+VAMP is fully containerized using Docker, enabling consistent deployment across any environment without manual dependency management. The Docker image packages the Python runtime, Flask application, system-level dependencies (ffmpeg, git), and all Python packages into a single portable artifact published to Docker Hub.
+
+### 10.2 Dockerfile Breakdown
+
+The Dockerfile follows a structured multi-stage approach optimized for layer caching and minimal image size:
+
+| Layer | Instruction | Purpose |
+|-------|-------------|----------|
+| **Base Image** | `FROM python:3.10-slim` | Minimal Debian-based Python 3.10 runtime (185 MB). The slim variant excludes development headers and documentation, reducing the attack surface and image size. |
+| **System Dependencies** | `RUN apt-get install ffmpeg git` | Installs ffmpeg (required by pydub for WebM-to-WAV audio conversion) and git (required by conversation_store.py for automated version control). The `--no-install-recommends` flag and cache cleanup minimize layer size. |
+| **Working Directory** | `WORKDIR /vamp` | Sets the project root to `/vamp`, mirroring the local project structure so that relative path resolution in conversation_store.py works correctly. |
+| **Python Dependencies** | `COPY requirements.txt` then `RUN pip install` | Copies only the requirements file first, leveraging Docker's layer cache — dependencies are only reinstalled when `requirements.txt` changes, not on every code edit. |
+| **Application Code** | `COPY app/ app/` | Copies the complete application source including the Flask server, all service modules, and the static web interface. |
+| **Conversation Directory** | `RUN mkdir -p /vamp/conversation` | Pre-creates the project output directory inside the container. This directory is intended to be mounted as an external volume for data persistence. |
+| **Port Configuration** | `ENV PORT=5000` and `EXPOSE 5000` | Sets the default server port via environment variable and documents the exposed port for container orchestration tools. |
+| **Entrypoint** | `CMD ["python", "app.py"]` | Starts the Flask server using the exec form, ensuring proper signal handling for graceful container shutdown. |
+
+### 10.3 Docker Ignore Configuration
+
+The `.dockerignore` file excludes unnecessary files from the build context to reduce image size and prevent sensitive data from being baked into the image:
+
+| Excluded Pattern | Reason |
+|-----------------|--------|
+| `.git/` | Version control history is not needed at runtime |
+| `.env`, `app/.env` | API keys and secrets must never be embedded in an image |
+| `conversation/` | Generated projects are runtime data, mounted as a volume |
+| `_report/`, `_rsc/` | Documentation and resource files are not part of the application |
+| `__pycache__/`, `*.pyc` | Compiled bytecode is regenerated at runtime |
+| `app/.venv/` | Local virtual environment is replaced by container-level packages |
+
+### 10.4 Image Specifications
+
+| Attribute | Value |
+|-----------|-------|
+| **Base** | `python:3.10-slim` (Debian Trixie) |
+| **Final Image Size** | ~256 MB |
+| **System Packages** | ffmpeg, git |
+| **Python Packages** | Flask, Flask-CORS, OpenAI SDK, pydub, python-dotenv, requests |
+| **Exposed Port** | 5000 |
+| **Registry** | Docker Hub — `ronvoy/vamp:latest` |
+
+### 10.5 Deployment Commands
+
+**Pull the image from Docker Hub:**
+
+```bash
+docker pull ronvoy/vamp:latest
+```
+
+**Run with environment variables and persistent storage:**
+
+```bash
+docker run -d \
+  --name vamp \
+  -p 5000:5000 \
+  -e OPENROUTER_API_KEY=your_api_key_here \
+  -e TRANSCRIBE_MODEL=google/gemini-2.5-flash \
+  -e DEFAULT_AGENT=openai \
+  -v ./conversation:/vamp/conversation \
+  ronvoy/vamp:latest
+```
+
+**Build locally from source:**
+
+```bash
+docker build -t vamp .
+```
+
+**Run the locally built image:**
+
+```bash
+docker run -d \
+  --name vamp \
+  -p 5000:5000 \
+  -e OPENROUTER_API_KEY=your_api_key_here \
+  -v ./conversation:/vamp/conversation \
+  vamp
+```
+
+**View container logs:**
+
+```bash
+docker logs -f vamp
+```
+
+**Stop and remove the container:**
+
+```bash
+docker stop vamp && docker rm vamp
+```
+
+### 10.6 Environment Variables
+
+All configuration is passed at runtime through environment variables, following the twelve-factor app methodology. No secrets are baked into the image.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | Yes | — | API key for accessing OpenRouter's LLM gateway |
+| `TRANSCRIBE_MODEL` | No | `google/gemini-2.5-flash` | Model used for voice-to-text transcription |
+| `DEFAULT_AGENT` | No | `openai` | Fallback LLM agent when no keyword is detected |
+| `PORT` | No | `5000` | HTTP server listening port |
+
+### 10.7 Volume Mounts
+
+The `conversation/` directory stores all generated projects and their git history. Mounting this as a Docker volume ensures data persists across container restarts, upgrades, and redeployments:
+
+```bash
+-v /path/on/host/conversation:/vamp/conversation
+```
+
+Without this mount, all generated projects are lost when the container is removed.
+
+---
+
+## 11. Conclusion
 
 VAMP demonstrates a practical AI system engineering pipeline that bridges the gap between natural language voice input and executable software output. The architecture cleanly separates concerns across transcription, routing, generation, and persistence layers, while maintaining simplicity through file-based storage and a single external API gateway.
 

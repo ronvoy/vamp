@@ -1,0 +1,17 @@
+.git
+.gitignore
+.qodo
+.vscode
+.idea
+.env
+_report
+_rsc
+conversation
+README.md
+*.pyc
+*.pyo
+*.pyd
+__pycache__
+app/.venv
+app/__pycache__
+app/.env
