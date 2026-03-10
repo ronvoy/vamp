@@ -15,4 +15,9 @@ app/.env
 
 # Generated output
 conversation/
-_rsc/
+.qodo
+.vscode
+.idea
+*.log
+*.tmp
+*.bak
