@@ -5,6 +5,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 from datetime import datetime
 
@@ -420,7 +421,7 @@ def run_project(folder: str) -> dict:
 
     # Build command
     if run_type == "python":
-        cmd = ["python", run_file]
+        cmd = [sys.executable, run_file]
     elif run_type == "node":
         cmd = ["node", run_file]
     else:
