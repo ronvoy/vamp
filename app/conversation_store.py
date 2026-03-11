@@ -107,7 +107,7 @@ def list_conversations():
     items = []
     for name in sorted(os.listdir(CONV_DIR), reverse=True):
         path = os.path.join(CONV_DIR, name)
-        if not os.path.isdir(path) or name.startswith("."):
+        if not os.path.isdir(path) or name.startswith(".") or name.startswith("_temp_"):
             continue
         meta = _read_meta(path)
         items.append({
@@ -531,7 +531,7 @@ def git_branch_from_commit(folder: str, commit_hash: str) -> dict:
     # Create new folder name
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     base_name = re.sub(r'^\d{4}-\d{2}-\d{2}_\d{4}_', '', folder)
-    new_folder = f"{timestamp}_{base_name}-at-{commit_hash[:8]}"
+    new_folder = f"{timestamp}_{commit_hash[:8]}_{base_name}"
     new_path = os.path.join(CONV_DIR, new_folder)
     os.makedirs(new_path, exist_ok=True)
 
