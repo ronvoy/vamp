@@ -335,7 +335,8 @@
   </div>
 
   <script>
-    const API = window.location.origin;
+    const _si = window.location.pathname.lastIndexOf('/static/');
+    const API = window.location.origin + (_si > 0 ? window.location.pathname.substring(0, _si) : '');
     const rec = document.getElementById('record');
     const recordWrap = document.getElementById('record-wrap');
     const btnClear = document.getElementById('btn-clear');

@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, redirect, send_from_directory
+from flask import Flask, request, jsonify, redirect, send_from_directory, url_for
 from flask_cors import CORS
 
 from transcriber import transcribe_bytes
@@ -24,7 +24,7 @@ GENERATORS = {
 
 @app.route("/")
 def index():
-    return redirect("/static/voice.html")
+    return redirect(url_for('static', filename='voice.html'))
 
 @app.route("/api/voice", methods=["POST"])
 def handle_voice():
