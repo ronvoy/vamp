@@ -6,7 +6,9 @@
 **Project Supervisor:** Prof. Roberto Pietrantuono
 **Report by:** Hussain Ullah Baig (D03000205), Rohan Baidya (D03000192)
 **Github Link:** https://github.com/ronvoy/vamp
-**Project:** VAMP — A Voice-Driven AI Code Generation System  
+**Report Link:** https://unina.cc/aise
+**Project Link:** https://unina.cc/vamp
+**Project:** VAMP — Voice Application Multi-LLM Platform
 
 ---
 
