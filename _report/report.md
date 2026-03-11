@@ -148,7 +148,7 @@ Three presets apply predefined slider values for common use cases:
 
 ### 4.4 Conversation Store
 
-Handles project creation, execution, metadata, git, renaming, and deletion.
+Handles project creation, execution, metadata, git, renaming, deletion, runtime process management, and commit-level operations.
 
 - **Creation:** Makes a folder like `2026-03-10_1430_weather-dashboard/` under `conversation/`. Folder names are sanitized to lowercase alphanumerics and hyphens, max 50 characters.
 - **Execution:** Writes `setup.sh` and runs it via `subprocess.run()` with a 60-second timeout to prevent runaway scripts.
@@ -156,6 +156,10 @@ Handles project creation, execution, metadata, git, renaming, and deletion.
 - **Git:** Initializes a repo in `conversation/` and commits after every create/update/delete. Commit messages include the agent name and a task summary. Author is set to "vamp".
 - **Continuation:** Loads existing project files as context for incremental updates. New commits are appended to the history.
 - **Deletion/Rename:** `shutil.rmtree()` for deletion, prefix-preserving rename. Both validate against path traversal.
+- **Runtime Process Management:** Spawns subprocesses with stdin/stdout pipes. Processes are tracked in memory with buffered output for real-time polling. Stdin is piped so the UI can send input to interactive programs.
+- **Git Reset:** Checks out all files from a specific commit, stages the changes, and creates a new commit recording the reset.
+- **Git Branch:** Extracts files from a specific commit into a new conversation folder. Metadata records the parent folder and commit hash. The new folder inherits ancestor history up to the branch point.
+- **Run at Commit:** Extracts files from a specific commit into a temporary directory, runs the project there, and cleans up the directory when execution ends.
 
 ### 4.5 Web Interface
 
@@ -165,12 +169,28 @@ A single `voice.html` file (~1,500 lines, vanilla JS/CSS/HTML) served by Flask. 
 - **Transcript editing:** The transcription result is shown in an editable textarea so users can fix errors before generating.
 - **Model dropdown:** Searchable, keyboard-navigable. Shows model name, context size, and per-token pricing.
 - **LLM tuning panel:** A collapsible panel with six sliders (temperature, top_p, top_k, frequency penalty, presence penalty, max tokens) and three presets (Creative, Balanced, Deterministic). Values are sent with every generation request.
-- **History sidebar:** Lists all projects newest-first with search, rename, and delete. Clicking a project shows its files, git log, and diffs.
+- **History sidebar:** Lists all projects newest-first with search, rename, and delete. The actively viewed chat is highlighted with a colored left border. Clicking a project shows its files, git log, and diffs.
+- **Run button:** Each project has a Run button that detects the entry point (index.html, main.py, app.py, etc.). HTML projects open in a new tab. Python/Node projects spawn a subprocess with real-time console output. An inline input field lets users send stdin to interactive programs.
+- **Git timeline:** Each commit in the history shows Reset, Branch, and Run buttons. Reset checks out files at that commit. Branch creates a new chat entry that inherits all ancestor commits up to the branch point. Run extracts files into a temporary directory for execution at any past commit.
 - **Result view:** Shows generated files, execution output, reasoning, and raw response. Git diffs between iterations. Dark/light theme toggle saved to localStorage. GSAP handles animations.
 
-### 4.6 REST API
+### 4.6 Runtime Execution
 
-Nine endpoints:
+![Runtime Execution Workflow](diagrams/runtime.png)
+
+The runtime system lets users execute generated projects directly from the browser. It supports three execution paths:
+
+| Path | Trigger | What happens |
+|------|---------|-------------|
+| **HTML preview** | Click Run on a project with `index.html` | Opens the file in a new browser tab via Flask static serving |
+| **Process execution** | Click Run on a project with Python/Node entry point | Spawns a subprocess with piped stdin/stdout. Output is buffered and polled by the frontend every 500ms. Users can send input via a text field. CTRL_BREAK (Windows) or SIGTERM (Unix) for stopping. |
+| **Run at commit** | Click Run on a specific commit in git history | Files from that commit are extracted into a temporary directory, the project runs there, and cleanup happens on stop or exit. |
+
+Branching creates a new conversation folder containing the files at the selected commit. The branch metadata records the parent folder and commit hash, so the git log display prepends ancestor commits up to the branch point. This gives the new chat a complete history view without duplicating git data.
+
+### 4.7 REST API
+
+Sixteen endpoints:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -182,8 +202,15 @@ Nine endpoints:
 | `/api/history` | GET | List of all projects |
 | `/api/conversation/:folder` | GET | Full project details with files, commits, diffs |
 | `/api/conversation/:folder/rename` | PUT | Rename a project |
-| `/api/conversation/:folder` | DELETE | Delete a project |
-
+| `/api/conversation/:folder` | DELETE | Delete a project || `/api/run/:folder` | POST | Start running a project |
+| `/api/run/:folder/output` | GET | Poll console output from a running process |
+| `/api/run/:folder/stop` | POST | Stop a running project |
+| `/api/run/:folder/input` | POST | Send stdin text to a running process |
+| `/api/run/:folder/detect` | GET | Detect the main runnable file in a project |
+| `/api/conversation/:folder/reset` | POST | Reset project files to a specific commit |
+| `/api/conversation/:folder/branch` | POST | Create a new conversation branched from a commit |
+| `/api/run/:folder/at/:hash` | POST | Run a project at a specific historical commit |
+| `/api/run/cleanup/:key` | POST | Stop and clean up a temporary commit run |
 All return JSON. Folder parameters are checked for path traversal. Audio uploads are validated for content.
 
 ---
@@ -198,6 +225,10 @@ All return JSON. Folder parameters are checked for path traversal. Audio uploads
 | 4 | Code Generator | Task + model | System prompt → LLM → regex parse | Script + folder name + reasoning |
 | 5 | Conv. Store | Script | Create folder, run with timeout, save metadata, git commit | Versioned project |
 | 6 | Browser | JSON response | Render files, diffs, logs | Visual output |
+| 7 | Browser | Click Run | Detect entry point, spawn subprocess or open HTML | Running process / preview tab |
+| 8 | Browser | Console polling | Fetch buffered stdout every 500ms, display in UI | Real-time output |
+| 9 | Browser | Stdin input | Send user text to process stdin pipe | Interactive I/O |
+| 10 | Browser | Git action | Reset/Branch/Run at a specific commit | Modified files, new chat, or temp execution |
 
 ---
 
@@ -362,6 +393,6 @@ Mount the conversation directory to keep generated projects across restarts:
 
 ## 11. Conclusion
 
-VAMP takes voice input and turns it into runnable, version-controlled software projects. The architecture keeps things simple — Flask for the backend, one HTML file for the frontend, OpenRouter as the single API gateway, and git for versioning. Each module (transcription, routing, generation, storage) handles one job and can be replaced independently. The Docker image makes deployment straightforward: pull, set your API key, run.
+VAMP takes voice input and turns it into runnable, version-controlled software projects. The architecture keeps things simple — Flask for the backend, one HTML file for the frontend, OpenRouter as the single API gateway, and git for versioning. Each module (transcription, routing, generation, storage) handles one job and can be replaced independently. The runtime execution system lets users run generated projects directly from the browser with real-time console output and stdin support. Git-level operations (reset, branch, run at commit) give users full control over project history without leaving the interface. The Docker image makes deployment straightforward: pull, set your API key, run.
 
 Possible next steps: streaming LLM responses, multi-turn conversation support, auto-testing generated code, sandboxed execution, and multi-user collaboration via shared git.

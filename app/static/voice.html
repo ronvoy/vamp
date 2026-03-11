@@ -172,6 +172,7 @@
     .detail-actions input { padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; flex: 1; min-width: 120px; }
     .history-item { cursor: pointer; }
     .history-item:hover { background: var(--output-bg); }
+    .history-item.active { background: var(--output-bg); border-left: 3px solid var(--path-color); padding-left: calc(0.75rem - 3px); }
 
     #open-history {
       position: relative; left: 0;
@@ -239,6 +240,40 @@
     .history-meta { font-size: 0.75rem; color: var(--text-muted); }
     .history-folder { font-family: monospace; font-size: 0.8rem; color: var(--path-color); }
     .history-empty { color: var(--text-muted); font-style: italic; padding: 1rem 0; }
+
+    .run-section { margin-top: 0.75rem; }
+    .btn-run { padding: 0.5rem 1.2rem; font-size: 0.85rem; border-radius: 6px; border: none; cursor: pointer; background: #2563eb; color: white; font-weight: 600; }
+    .btn-run:hover { background: #1d4ed8; }
+    .btn-run.running { background: #dc2626; }
+    .btn-run.running:hover { background: #b91c1c; }
+    .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-open-preview { padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; background: var(--bg); color: var(--path-color); margin-left: 0.5rem; }
+    .btn-open-preview:hover { background: var(--output-bg); }
+    .run-console {
+      margin-top: 0.5rem; max-height: 300px; overflow-y: auto; padding: 0.75rem;
+      background: #1e1e1e; color: #d4d4d4; border-radius: 6px;
+      font-family: 'Consolas','Monaco',monospace; font-size: 0.78rem;
+      white-space: pre-wrap; word-break: break-all; display: none;
+    }
+    body.dark .run-console { background: #0d0d0d; }
+    .run-console.visible { display: block; }
+    .run-console .run-line-err { color: #f87171; }
+    .run-console .run-line-info { color: #60a5fa; }
+    .run-input-row { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
+    .run-input-row input { flex: 1; padding: 0.35rem 0.5rem; font-family: 'Consolas','Monaco',monospace; font-size: 0.78rem; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; }
+    body.dark .run-input-row input { background: #0d0d0d; border-color: #333; }
+    .run-input-row button { padding: 0.35rem 0.75rem; font-size: 0.78rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+    .run-input-row button:hover { background: #1d4ed8; }
+    .git-commit-actions { display: flex; gap: 0.3rem; margin-top: 0.25rem; flex-wrap: wrap; }
+    .btn-git-action { padding: 0.2rem 0.5rem; font-size: 0.68rem; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; font-weight: 600; background: var(--bg); color: var(--text-muted); }
+    .btn-git-action:hover { filter: brightness(0.9); }
+    .btn-git-action.hard { color: #f87171; border-color: #f87171; }
+    .btn-git-action.branch { color: #34d399; border-color: #34d399; }
+    .btn-git-action.run-commit { color: #fbbf24; border-color: #fbbf24; }
+    .btn-git-action.run-commit.running { background: #dc2626; color: white; border-color: #dc2626; }
+    .commit-console { margin-top: 0.35rem; max-height: 200px; overflow-y: auto; padding: 0.5rem; background: #1e1e1e; color: #d4d4d4; border-radius: 4px; font-family: 'Consolas','Monaco',monospace; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; display: none; }
+    body.dark .commit-console { background: #0d0d0d; }
+    .commit-console.visible { display: block; }
   </style>
 </head>
 <body>
@@ -641,6 +676,8 @@
         el.addEventListener('click', () => {
           const folder = el.dataset.folder;
           if (!folder) return;
+          historyList.querySelectorAll('.history-item.active').forEach(a => a.classList.remove('active'));
+          el.classList.add('active');
           fetch(API + '/api/conversation/' + encodeURIComponent(folder))
             .then(r => r.json())
             .then(conv => { if (conv.error) return; renderDetailPanel(conv); out.innerHTML = ''; })
@@ -681,13 +718,19 @@
       return html;
     }
 
-    function renderGitTimeline(commits) {
+    function renderGitTimeline(commits, folder) {
       if (!commits || !commits.length) return '';
       return '<ul class="git-timeline">' + commits.map(c =>
         `<li class="git-commit">
           <span class="git-hash">${escapeHtml(c.hash)}</span>
           <span class="git-msg">${escapeHtml(c.message)}</span><br>
           <span class="git-date">${escapeHtml(c.date)}</span>
+          <div class="git-commit-actions">
+            <button class="btn-git-action hard" data-folder="${escapeHtml(folder)}" data-hash="${escapeHtml(c.full_hash)}" data-action="reset-hard">Reset</button>
+            <button class="btn-git-action branch" data-folder="${escapeHtml(folder)}" data-hash="${escapeHtml(c.full_hash)}" data-action="branch">Branch</button>
+            <button class="btn-git-action run-commit" data-folder="${escapeHtml(folder)}" data-hash="${escapeHtml(c.full_hash)}" data-action="run-commit">Run</button>
+          </div>
+          <div class="commit-console" id="console-${escapeHtml(c.full_hash).slice(0,8)}"></div>
         </li>`
       ).reverse().join('') + '</ul>';
     }
@@ -717,6 +760,10 @@
           ${hasDiffs ? '<div class="response-toggle" id="resp-diff-toggle">▼ Show changes (git diff)</div><div class="response-expanded" id="resp-diff-expanded">' + diffHtml + '</div>' : ''}
           ${reasoning ? '<div class="response-toggle" id="resp-reason-toggle">▼ Show reasoning</div><div class="response-expanded" id="resp-reason-expanded"><pre class="code-block">' + escapeHtml(reasoning) + '</pre></div>' : ''}
           ${rawResponse ? '<div class="response-toggle" id="resp-code-toggle">▼ Show setup.sh & LLM response</div><div class="response-expanded" id="resp-code-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
+          <div class="run-section" data-folder="${escapeHtml(data.folder || '')}">
+            <button class="btn-run" data-folder="${escapeHtml(data.folder || '')}">Run</button>
+            <div class="run-console"></div>
+          </div>
         </div>`;
       const bind = (sel, expSel, showText, hideText) => {
         const el = out.querySelector(sel);
@@ -730,6 +777,9 @@
       bind('#resp-diff-toggle', '#resp-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
       bind('#resp-reason-toggle', '#resp-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
       bind('#resp-code-toggle', '#resp-code-expanded', '▼ Show setup.sh & LLM response', '▲ Hide');
+      // Bind Run button
+      const runBtn = out.querySelector('.btn-run');
+      if (runBtn) runBtn.addEventListener('click', () => handleRun(runBtn));
     }
 
     function renderDetailPanel(conv) {
@@ -748,7 +798,7 @@
       const diffHtml = renderDiffHtml(gitDiff);
       const hasDiffs = !!diffHtml;
       const hasTimeline = gitLog.length > 0;
-      const timelineHtml = renderGitTimeline(gitLog);
+      const timelineHtml = renderGitTimeline(gitLog, conv.folder);
       const statusIcon = scriptOk ? '✓' : (scriptOk === false ? '✗' : '');
       const statusColor = scriptOk ? 'var(--path-color)' : '#e74c3c';
       detailPanel.classList.add('visible');
@@ -768,6 +818,10 @@
         </div>
         ${reasoning ? '<div class="response-toggle" id="detail-reason-expand">▼ Show reasoning</div><div class="response-expanded" id="detail-reason-expanded"><pre class="code-block">' + escapeHtml(reasoning) + '</pre></div>' : ''}
         ${rawResponse ? '<div class="response-toggle" id="detail-raw-expand">▼ Show full LLM response</div><div class="response-expanded" id="detail-raw-expanded"><pre class="code-block">' + escapeHtml(rawResponse) + '</pre></div>' : ''}
+        <div class="run-section" data-folder="${escapeHtml(conv.folder)}">
+          <button class="btn-run" data-folder="${escapeHtml(conv.folder)}">Run</button>
+          <div class="run-console"></div>
+        </div>
         <div class="detail-actions">
           <input type="text" id="rename-input" placeholder="New name" value="${escapeHtml((conv.folder || '').replace(/^\d{4}-\d{2}-\d{2}_\d{4}_/, ''))}" />
           <button id="btn-rename">Rename</button>
@@ -785,9 +839,14 @@
       detailBind('#detail-diff-toggle', '#detail-diff-expanded', '▼ Show changes (git diff)', '▲ Hide changes');
       detailBind('#detail-timeline-toggle', '#detail-timeline-expanded',
         '▼ Show git history (' + gitLog.length + ' commits)', '▲ Hide git history');
+      // Bind git commit action buttons
+      bindGitCommitActions(detailPanel, conv);
       detailBind('#detail-code-expand', '#detail-code-expanded', '▼ Show files', '▲ Hide files');
       detailBind('#detail-reason-expand', '#detail-reason-expanded', '▼ Show reasoning', '▲ Hide reasoning');
       detailBind('#detail-raw-expand', '#detail-raw-expanded', '▼ Show full LLM response', '▲ Hide LLM response');
+      // Bind Run button in detail panel
+      const detailRunBtn = detailPanel.querySelector('.btn-run');
+      if (detailRunBtn) detailRunBtn.addEventListener('click', () => handleRun(detailRunBtn));
       detailPanel.querySelector('#btn-rename').addEventListener('click', async () => {
         const newName = detailPanel.querySelector('#rename-input').value.trim();
         if (!newName) return;
@@ -811,6 +870,243 @@
         } catch (e) { alert(e.message); }
       });
     }
+
+    /* ---------- Run project ---------- */
+    let _runPollers = {};
+    let _commitPollers = {};
+
+    function bindGitCommitActions(container, conv) {
+      container.querySelectorAll('.btn-git-action').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const folder = btn.dataset.folder;
+          const hash = btn.dataset.hash;
+          const action = btn.dataset.action;
+
+          if (action === 'reset-hard') {
+            const mode = 'hard';
+            if (!confirm('Reset ' + folder + ' to commit ' + hash.slice(0,8) + '? This will change the project files.')) return;
+            btn.disabled = true;
+            try {
+              const r = await fetch(API + '/api/conversation/' + encodeURIComponent(folder) + '/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hash, mode }) });
+              const d = await r.json();
+              if (d.error) { alert(d.error); btn.disabled = false; return; }
+              // Reload detail panel
+              const r2 = await fetch(API + '/api/conversation/' + encodeURIComponent(folder));
+              const conv2 = await r2.json();
+              if (!conv2.error) renderDetailPanel(conv2);
+            } catch (e) { alert(e.message); btn.disabled = false; }
+          }
+
+          else if (action === 'branch') {
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+            try {
+              const r = await fetch(API + '/api/conversation/' + encodeURIComponent(folder) + '/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hash }) });
+              const d = await r.json();
+              if (d.error) { alert(d.error); btn.disabled = false; btn.textContent = 'Branch'; return; }
+              loadHistory();
+              btn.textContent = 'Branched';
+              setTimeout(() => { btn.disabled = false; btn.textContent = 'Branch'; }, 2000);
+            } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Branch'; }
+          }
+
+          else if (action === 'run-commit') {
+            const consoleDv = btn.closest('.git-commit').querySelector('.commit-console');
+            // If already running at this commit, stop it
+            const tempKey = '_temp_' + folder + '_' + hash.slice(0,8);
+            if (btn.classList.contains('running')) {
+              try { await fetch(API + '/api/run/cleanup/' + encodeURIComponent(tempKey), { method: 'POST' }); } catch {}
+              btn.classList.remove('running');
+              btn.textContent = 'Run';
+              if (_commitPollers[tempKey]) { clearInterval(_commitPollers[tempKey]); delete _commitPollers[tempKey]; }
+              consoleDv.innerHTML += '\n<span class="run-line-info">--- Stopped & cleaned up ---</span>\n';
+              return;
+            }
+
+            consoleDv.innerHTML = '';
+            consoleDv.classList.add('visible');
+            consoleDv.textContent = 'Starting at ' + hash.slice(0,8) + '...\n';
+            btn.disabled = true;
+
+            try {
+              const r = await fetch(API + '/api/run/' + encodeURIComponent(folder) + '/at/' + encodeURIComponent(hash), { method: 'POST' });
+              const d = await r.json();
+              if (d.error) {
+                consoleDv.textContent += 'Error: ' + d.error + '\n';
+                btn.disabled = false;
+                return;
+              }
+
+              // HTML type — just open in new tab
+              if (d.type === 'html') {
+                const url = API + '/conversation/' + encodeURIComponent(d.temp_key || tempKey) + '/' + d.file;
+                consoleDv.innerHTML = '<span class="run-line-info">Opening ' + escapeHtml(d.file) + ' in new tab...</span>';
+                window.open(url, '_blank');
+                btn.disabled = false;
+                return;
+              }
+
+              btn.disabled = false;
+              btn.classList.add('running');
+              btn.textContent = 'Stop';
+
+              const runKey = d.temp_key || tempKey;
+              let offset = 0;
+              _commitPollers[runKey] = setInterval(async () => {
+                try {
+                  const pr = await fetch(API + '/api/run/' + encodeURIComponent(runKey) + '/output?offset=' + offset);
+                  const pd = await pr.json();
+                  if (pd.lines && pd.lines.length) {
+                    pd.lines.forEach(line => {
+                      const span = document.createElement('span');
+                      span.textContent = line;
+                      consoleDv.appendChild(span);
+                    });
+                    offset = pd.offset;
+                    consoleDv.scrollTop = consoleDv.scrollHeight;
+                  }
+                  if (pd.done) {
+                    clearInterval(_commitPollers[runKey]);
+                    delete _commitPollers[runKey];
+                    btn.classList.remove('running');
+                    btn.textContent = 'Run';
+                    const code = pd.exit_code !== null && pd.exit_code !== undefined ? pd.exit_code : '?';
+                    const exitSpan = document.createElement('span');
+                    exitSpan.className = code === 0 ? 'run-line-info' : 'run-line-err';
+                    exitSpan.textContent = '\n--- Exited (code ' + code + ') ---\n';
+                    consoleDv.appendChild(exitSpan);
+                    // Clean up temp directory
+                    try { await fetch(API + '/api/run/cleanup/' + encodeURIComponent(runKey), { method: 'POST' }); } catch {}
+                  }
+                } catch {}
+              }, 500);
+
+            } catch (e) {
+              consoleDv.textContent += 'Error: ' + (e.message || e) + '\n';
+              btn.disabled = false;
+            }
+          }
+        });
+      });
+    }
+
+    async function handleRun(btn) {
+      const folder = btn.dataset.folder;
+      if (!folder) return;
+      const section = btn.closest('.run-section');
+      const consoleDv = section.querySelector('.run-console');
+
+      // If already running, stop it
+      if (btn.classList.contains('running')) {
+        try { await fetch(API + '/api/run/' + encodeURIComponent(folder) + '/stop', { method: 'POST' }); } catch {}
+        btn.classList.remove('running');
+        btn.textContent = 'Run';
+        if (_runPollers[folder]) { clearInterval(_runPollers[folder]); delete _runPollers[folder]; }
+        consoleDv.innerHTML += '\n<span class="run-line-info">--- Stopped ---</span>\n';
+        const ir = section.querySelector('.run-input-row');
+        if (ir) ir.remove();
+        return;
+      }
+
+      // Detect what to run
+      consoleDv.innerHTML = '';
+      consoleDv.classList.add('visible');
+      consoleDv.textContent = 'Detecting runnable file...\n';
+
+      try {
+        const detectRes = await fetch(API + '/api/run/' + encodeURIComponent(folder) + '/detect');
+        const detectData = await detectRes.json();
+
+        if (detectData.error) {
+          consoleDv.textContent = 'Error: ' + detectData.error;
+          return;
+        }
+
+        // HTML files: open in new tab, no process needed
+        if (detectData.type === 'html') {
+          const url = API + '/conversation/' + encodeURIComponent(folder) + '/' + detectData.file;
+          consoleDv.innerHTML = '<span class="run-line-info">Opening ' + escapeHtml(detectData.file) + ' in new tab...</span>';
+          window.open(url, '_blank');
+          // Also add an Open Preview button
+          if (!section.querySelector('.btn-open-preview')) {
+            const openBtn = document.createElement('button');
+            openBtn.className = 'btn-open-preview';
+            openBtn.textContent = 'Open Preview';
+            openBtn.addEventListener('click', () => window.open(url, '_blank'));
+            btn.after(openBtn);
+          }
+          return;
+        }
+
+        // Start process
+        consoleDv.textContent = 'Starting ' + detectData.file + '...\n';
+        const runRes = await fetch(API + '/api/run/' + encodeURIComponent(folder), { method: 'POST' });
+        const runData = await runRes.json();
+
+        if (runData.error) {
+          consoleDv.textContent += 'Error: ' + runData.error + '\n';
+          return;
+        }
+
+        btn.classList.add('running');
+        btn.textContent = 'Stop';
+
+        // Add stdin input row
+        let inputRow = section.querySelector('.run-input-row');
+        if (!inputRow) {
+          inputRow = document.createElement('div');
+          inputRow.className = 'run-input-row';
+          inputRow.innerHTML = '<input type="text" placeholder="Type input and press Enter..." /><button>Send</button>';
+          consoleDv.after(inputRow);
+          const inp = inputRow.querySelector('input');
+          const sendBtn = inputRow.querySelector('button');
+          const doSend = async () => {
+            const text = inp.value;
+            if (text === '') return;
+            inp.value = '';
+            try { await fetch(API + '/api/run/' + encodeURIComponent(folder) + '/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); } catch {}
+          };
+          sendBtn.addEventListener('click', doSend);
+          inp.addEventListener('keydown', e => { if (e.key === 'Enter') doSend(); });
+        }
+
+        // Start polling for output
+        let offset = 0;
+        _runPollers[folder] = setInterval(async () => {
+          try {
+            const r = await fetch(API + '/api/run/' + encodeURIComponent(folder) + '/output?offset=' + offset);
+            const d = await r.json();
+            if (d.lines && d.lines.length) {
+              d.lines.forEach(line => {
+                const span = document.createElement('span');
+                span.textContent = line;
+                consoleDv.appendChild(span);
+              });
+              offset = d.offset;
+              consoleDv.scrollTop = consoleDv.scrollHeight;
+            }
+            if (d.done) {
+              clearInterval(_runPollers[folder]);
+              delete _runPollers[folder];
+              btn.classList.remove('running');
+              btn.textContent = 'Run';
+              const ir = section.querySelector('.run-input-row');
+              if (ir) ir.remove();
+              const code = d.exit_code !== null && d.exit_code !== undefined ? d.exit_code : '?';
+              const exitSpan = document.createElement('span');
+              exitSpan.className = code === 0 ? 'run-line-info' : 'run-line-err';
+              exitSpan.textContent = '\n--- Process exited (code ' + code + ') ---\n';
+              consoleDv.appendChild(exitSpan);
+              consoleDv.scrollTop = consoleDv.scrollHeight;
+            }
+          } catch {}
+        }, 500);
+
+      } catch (e) {
+        consoleDv.textContent = 'Error: ' + (e.message || e);
+      }
+    }
+    /* ---------- end run ---------- */
 
     loadHistory();
   </script>

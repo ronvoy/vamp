@@ -1,0 +1,24 @@
+flowchart TD
+    A[User clicks Run] --> B{Detect runnable file}
+    B -->|index.html| C[Open in new browser tab]
+    B -->|main.py / app.py| D[Spawn subprocess]
+    D --> E[Poll stdout every 500ms]
+    E --> F{Process running?}
+    F -->|Yes| G[Display output in console]
+    G --> H{User types input?}
+    H -->|Yes| I[Send to stdin pipe]
+    I --> E
+    H -->|No| E
+    F -->|Exited| J[Show exit code]
+    F -->|User clicks Stop| K[Send CTRL_BREAK / terminate]
+    K --> J
+
+    L[User opens git history] --> M[Display commit timeline]
+    M --> N{User action per commit}
+    N -->|Reset| O[Checkout files at commit]
+    O --> P[New commit recorded]
+    N -->|Branch| Q[Copy files at commit to new folder]
+    Q --> R[New chat with ancestor history]
+    N -->|Run| S[Extract files to temp directory]
+    S --> T[Run in temp dir with polling]
+    T --> U[Auto-cleanup on stop/exit]

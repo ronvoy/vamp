@@ -3,13 +3,16 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, send_from_directory
 from flask_cors import CORS
 
 from transcriber import transcribe_bytes
 from agent_registry import select_agent, extract_task
 from code_generator import generate_openai, generate_anthropic, generate_with_model, fetch_models, AGENT_MODELS, DEFAULT_MODEL
-from conversation_store import save_conversation, list_conversations, get_conversation, get_git_diff, rename_conversation, delete_conversation
+from conversation_store import (save_conversation, list_conversations, get_conversation,
+    get_git_diff, rename_conversation, delete_conversation,
+    detect_runnable, run_project, get_run_output, stop_project, send_input,
+    git_reset_to_commit, git_branch_from_commit, run_at_commit, cleanup_temp_run, CONV_DIR)
 
 app = Flask(__name__)
 CORS(app)
@@ -180,6 +183,101 @@ def api_generate():
     if continue_from:
         resp["git_diff"] = get_git_diff(folder)
     return jsonify(resp)
+
+@app.route("/api/run/<path:folder>/input", methods=["POST"])
+def api_send_input(folder):
+    """Send stdin input to a running process."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    text = request.json.get("text", "")
+    result = send_input(folder, text)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/api/run/<path:folder>/output", methods=["GET"])
+def api_run_output(folder):
+    """Poll console output from a running project."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    offset = request.args.get("offset", 0, type=int)
+    return jsonify(get_run_output(folder, offset))
+
+@app.route("/api/run/<path:folder>/stop", methods=["POST"])
+def api_stop_project(folder):
+    """Stop a running project."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    return jsonify(stop_project(folder))
+
+@app.route("/api/run/<path:folder>/detect", methods=["GET"])
+def api_detect_runnable(folder):
+    """Detect what can be run in a project folder."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    result = detect_runnable(folder)
+    if not result:
+        return jsonify({"error": "No runnable file found"}), 404
+    return jsonify(result)
+
+@app.route("/api/run/<path:folder>/at/<commit_hash>", methods=["POST"])
+def api_run_at_commit(folder, commit_hash):
+    """Run a project at a specific commit using a temp directory."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    result = run_at_commit(folder, commit_hash)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/api/run/cleanup/<path:temp_key>", methods=["POST"])
+def api_cleanup_temp(temp_key):
+    """Stop and clean up a temp-branch run."""
+    if ".." in temp_key:
+        return jsonify({"error": "Invalid key"}), 400
+    return jsonify(cleanup_temp_run(temp_key))
+
+@app.route("/api/run/<path:folder>", methods=["POST"])
+def api_run_project(folder):
+    """Start running a generated project."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    result = run_project(folder)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/api/conversation/<path:folder>/reset", methods=["POST"])
+def api_git_reset(folder):
+    """Reset a project to a specific commit."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    data = request.json or {}
+    commit_hash = data.get("hash", "")
+    mode = data.get("mode", "soft")
+    result = git_reset_to_commit(folder, commit_hash, mode)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/api/conversation/<path:folder>/branch", methods=["POST"])
+def api_git_branch(folder):
+    """Create a branch copy of a project at a specific commit."""
+    if ".." in folder:
+        return jsonify({"error": "Invalid folder"}), 400
+    data = request.json or {}
+    commit_hash = data.get("hash", "")
+    result = git_branch_from_commit(folder, commit_hash)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/conversation/<path:filepath>")
+def serve_conversation_file(filepath):
+    """Serve static files from conversation folders (for HTML previews)."""
+    if ".." in filepath:
+        return jsonify({"error": "Invalid path"}), 400
+    return send_from_directory(CONV_DIR, filepath)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
